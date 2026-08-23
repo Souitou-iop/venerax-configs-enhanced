@@ -1,4 +1,6 @@
 class Komiic extends ComicSource {
+  init() {}
+
   // 此漫画源的名称
   name = "Komiic";
 
