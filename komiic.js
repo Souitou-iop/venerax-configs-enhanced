@@ -5,7 +5,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.0";
+  version = "1.1.1";
 
   minAppVersion = "1.0.0";
 
@@ -27,6 +27,7 @@ class Komiic extends ComicSource {
     };
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+      headers["Cookie"] = `komiic-access-token=${token}`;
     }
     return headers;
   }
@@ -58,16 +59,22 @@ class Komiic extends ComicSource {
     let json = JSON.parse(res.body);
 
     if (json.errors != undefined) {
-      const errorInfo = json.errors[0].message.toString();
+      const errorInfo = json.errors[0]?.message?.toString() || "";
       if (
         errorInfo.indexOf("token is expired") >= 0 ||
-        errorInfo.indexOf("no token") >= 0
+        errorInfo.indexOf("no token") >= 0 ||
+        errorInfo.indexOf("jwt expired") >= 0
       ) {
         const accountData = this.loadData("account");
-        await this.account.login(accountData[0], accountData[1]);
-        return await this.queryJson(query);
+        if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
+          await this.account.login(accountData[0], accountData[1]);
+          return await this.queryJson(query);
+        }
       }
-      throw json.errors[0].message;
+      if (errorInfo.indexOf("Daily image quota exceeded") >= 0) {
+        throw "Komiic 每日免登录图片配额已用尽（300张），请在漫画源设置中登录账号以获取完整额度。";
+      }
+      throw errorInfo;
     }
 
     return json;
@@ -132,21 +139,44 @@ class Komiic extends ComicSource {
   /// 账号
   account = {
     login: async (account, pwd) => {
-      let res = await Network.post(this.baseUrl + "/api/login", this.headers, {
+      let res = await Network.post(this.baseUrl + "/api/login", {
+        Referer: this.baseUrl + "/",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Content-Type": "application/json",
+      }, {
         email: account,
         password: pwd,
       });
 
       if (res.status === 200) {
-        this.saveData("token", JSON.parse(res.body).token);
+        let token = null;
+        let setCookie = res.headers?.["set-cookie"] || res.headers?.["Set-Cookie"];
+        if (setCookie) {
+          let m = setCookie.match(/komiic-access-token=([^;,\s]+)/);
+          if (m) token = m[1];
+        }
+        if (!token && res.body) {
+          try {
+            let json = JSON.parse(res.body);
+            token = json.token || json.data?.token || json.accessToken;
+          } catch (e) {}
+        }
+        if (token) {
+          this.saveData("token", token);
+          this.saveData("account", [account, pwd]);
+          return "ok";
+        }
+        this.saveData("account", [account, pwd]);
         return "ok";
       }
 
-      throw "Failed to login";
+      throw `登录失败 (HTTP ${res.status}): 请检查账号密码`;
     },
 
     logout: () => {
       this.deleteData("token");
+      this.deleteData("account");
     },
 
     registerWebsite: "https://komiic.com/register",
@@ -521,6 +551,7 @@ class Komiic extends ComicSource {
     },
     onImageLoad: (url, comicId, epId) => {
       let ticket = this._imageTickets?.[url];
+      let token = this.loadData("token");
       let headers = {
         "user-agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -528,6 +559,10 @@ class Komiic extends ComicSource {
       };
       if (ticket) {
         headers["X-Image-Ticket"] = ticket;
+      }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+        headers["Cookie"] = `komiic-access-token=${token}`;
       }
       return {
         headers: headers,

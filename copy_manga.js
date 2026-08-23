@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga"
 
-    version = "1.5.0"
+    version = "1.5.1"
 
     minAppVersion = "1.6.0"
 
@@ -178,8 +178,6 @@ class CopyManga extends ComicSource {
     init() {
         // 用于储存 { 作者名 : 英文参数 }
         this.author_path_word_dict = {}
-        this.refreshSearchApi()
-        this.refreshAppApi()
     }
 
     /// account
@@ -676,14 +674,13 @@ class CopyManga extends ComicSource {
                 };
                 let keys = Object.keys(groups);
                 let result = {};
-                let futures = [];
                 for (let group of keys) {
                     let path = groups[group]["path_word"];
-                    futures.push((async () => {
-                        result[group] = await fetchSingle(id, path);
-                    })());
+                    result[group] = await fetchSingle(id, path);
+                    if (keys.length > 1) {
+                        await new Promise(r => setTimeout(r, 120));
+                    }
                 }
-                await Promise.all(futures);
                 if (this.isAppVersionAfter("1.3.0")) {
                     // 支持多分组
                     let sortedResult = new Map();
@@ -819,7 +816,13 @@ class CopyManga extends ComicSource {
                                 continue;
                             }
 
-                            // If blocked by device/account fingerprint, rotate device info and try next domain
+                            // If blocked by 210 anti-crack/token fingerprint:
+                            // 1. If currently using user token, clear token to fallback to clean guest mode
+                            let curToken = this.loadData("token");
+                            if (curToken) {
+                                this.deleteData("token");
+                            }
+                            // 2. Rotate device fingerprints
                             this.saveData("_deviceinfo", CopyManga.generateDeviceInfo());
                             this.saveData("_device", CopyManga.generateDevice());
                             this.saveData("_pseudoid", CopyManga.generatePseudoid());
@@ -863,6 +866,22 @@ class CopyManga extends ComicSource {
                 }
             }
             throw lastErr;
+        },
+        onImageLoad: (url, comicId, epId) => {
+            let now = new Date(Date.now());
+            let year = now.getFullYear();
+            let month = (now.getMonth() + 1).toString().padStart(2, '0');
+            let day = now.getDate().toString().padStart(2, '0');
+            return {
+                headers: {
+                    "User-Agent": "COPY/3.0.9",
+                    "source": "copyApp",
+                    "referer": "com.copymanga.app-3.0.9",
+                    "version": "3.0.9",
+                    "platform": "3",
+                    "dt": `${year}.${month}.${day}`,
+                }
+            };
         },
         loadComments: async (comicId, subId, page, replyTo) => {
             let url = `${this.apiUrl}/api/v3/comments?comic_id=${subId}&limit=20&offset=${(page - 1) * 20}`;

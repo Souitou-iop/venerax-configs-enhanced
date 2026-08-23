@@ -1,107 +1,107 @@
 [
-    {
-        "name": "拷贝漫画",
-        "fileName": "copy_manga.js",
-        "key": "copy_manga",
-        "version": "1.5.0",
-        "description": "资源最全主力站：修复切章崩溃、210风控死锁与3.0.9指纹，支持多节点容灾与自愈"
-    },
-    {
-        "name": "Komiic",
-        "fileName": "komiic.js",
-        "key": "Komiic",
-        "version": "1.1.0",
-        "description": "台版高清正版扫图：已适配新版 imageTickets 鉴权，修复图片402加载问题"
-    },
-    {
-        "name": "包子漫画",
-        "fileName": "baozi.js",
-        "key": "baozi",
-        "version": "1.1.7",
-        "description": "连载国漫/汉化秒更免登录：修复章节正文图片解析，扩充活跃CDN节点"
-    },
-    {
-        "name": "漫画人",
-        "fileName": "manhuaren.js",
-        "key": "manhuaren",
-        "version": "1.0.0",
-        "description": "经典老牌平台：多分类推荐与正文高清图直连秒开"
-    },
-    {
-        "name": "爱看漫",
-        "fileName": "ikmmh.js",
-        "key": "ikmmh",
-        "version": "1.0.6",
-        "description": "爱看漫：详情与章节并发拉取，新增探索页5分钟轻量缓存"
-    },
-    {
-        "name": "漫画柜",
-        "fileName": "manhuagui.js",
-        "key": "ManHuaGui",
-        "version": "1.2.3",
-        "description": "漫画柜：逆向新版 LZString+splic 混淆，修复新章节解密失败问题"
-    },
-    {
-        "name": "禁漫天堂",
-        "fileName": "jm.js",
-        "key": "jm",
-        "version": "1.4.2",
-        "description": "18comic核心站：支持官方5条线路自动故障转移、12h域名缓存与打乱算法对齐"
-    },
-    {
-        "name": "Picacg / 哔咔",
-        "fileName": "picacg.js",
-        "key": "picacg",
-        "version": "1.0.6",
-        "description": "经典哔咔主力站：API-Key与HMAC鉴权，日榜分类全功能支持"
-    },
-    {
-        "name": "E-Hentai",
-        "fileName": "ehentai.js",
-        "key": "ehentai",
-        "version": "1.2.3",
-        "description": "国际顶级同人画廊：修复非标准 DOM 空列表崩溃与 taglist 解析，注入防封请求头"
-    },
-    {
-        "name": "nhentai",
-        "fileName": "nhentai.js",
-        "key": "nhentai",
-        "version": "1.1.3",
-        "description": "热门单本同人志：适配官方 v2 嵌套 JSON 结构，单本画廊切章注入与60s防限频缓存"
-    },
-    {
-        "name": "hitomi.la",
-        "fileName": "hitomi.js",
-        "key": "hitomi",
-        "version": "1.2.2",
-        "description": "高清图库：集成 galleryblock/nozomi LRU 缓存与 B-tree 搜索去重加速"
-    },
-    {
-        "name": "紳士漫畫",
-        "fileName": "wnacg.js",
-        "key": "wnacg",
-        "version": "1.0.11",
-        "description": "紳士漫畫：修复移动端UA选择器崩溃，支持标题作者/社团提取与4重搜索排序"
-    },
-    {
-        "name": "少年ジャンプ＋",
-        "fileName": "shonen_jump_plus.js",
-        "key": "shonen_jump_plus",
-        "version": "1.1.3",
-        "description": "集英社官方少年Jump+连载生肉漫画：iTunes 动态版本同步与详情/章节并发加速"
-    },
-    {
-        "name": "カドコミ",
-        "fileName": "comic_walker.js",
-        "key": "comic_walker",
-        "version": "1.1.0",
-        "description": "角川官方ComicWalker连载生肉漫画：升级至 1.6.0+ 特征，修复版本探活与回调异常"
-    },
-    {
-        "name": "CCC追漫台",
-        "fileName": "ccc.js",
-        "key": "ccc",
-        "version": "1.0.3",
-        "description": "台湾官方CCC创作集正版漫画：修复分类与搜索 options 空指针，关键词 URI 安全编码"
-    }
+  {
+    "name": "拷贝漫画",
+    "fileName": "copy_manga.js",
+    "key": "copy_manga",
+    "version": "1.5.1",
+    "description": "资源最全主力站：修复切章与210风控智能降级自愈，补齐App图片头，平滑分卷并发"
+  },
+  {
+    "name": "Komiic",
+    "fileName": "komiic.js",
+    "key": "Komiic",
+    "version": "1.1.1",
+    "description": "台版高清正版扫图：修复登录Token提取与Cookie鉴权缺失，彻底解决300张每日配额超限"
+  },
+  {
+    "name": "包子漫画",
+    "fileName": "baozi.js",
+    "key": "baozi",
+    "version": "1.1.7",
+    "description": "连载国漫/汉化秒更免登录：修复章节正文图片解析，扩充活跃CDN节点"
+  },
+  {
+    "name": "漫画人",
+    "fileName": "manhuaren.js",
+    "key": "manhuaren",
+    "version": "1.0.0",
+    "description": "经典老牌平台：多分类推荐与正文高清图直连秒开"
+  },
+  {
+    "name": "爱看漫",
+    "fileName": "ikmmh.js",
+    "key": "ikmmh",
+    "version": "1.0.6",
+    "description": "爱看漫：详情与章节并发拉取，新增探索页5分钟轻量缓存"
+  },
+  {
+    "name": "漫画柜",
+    "fileName": "manhuagui.js",
+    "key": "ManHuaGui",
+    "version": "1.2.3",
+    "description": "漫画柜：逆向新版 LZString+splic 混淆，修复新章节解密失败问题"
+  },
+  {
+    "name": "禁漫天堂",
+    "fileName": "jm.js",
+    "key": "jm",
+    "version": "1.4.2",
+    "description": "18comic核心站：支持官方5条线路自动故障转移、12h域名缓存与打乱算法对齐"
+  },
+  {
+    "name": "Picacg / 哔咔",
+    "fileName": "picacg.js",
+    "key": "picacg",
+    "version": "1.0.6",
+    "description": "经典哔咔主力站：API-Key与HMAC鉴权，日榜分类全功能支持"
+  },
+  {
+    "name": "E-Hentai",
+    "fileName": "ehentai.js",
+    "key": "ehentai",
+    "version": "1.2.3",
+    "description": "国际顶级同人画廊：修复非标准 DOM 空列表崩溃与 taglist 解析，注入防封请求头"
+  },
+  {
+    "name": "nhentai",
+    "fileName": "nhentai.js",
+    "key": "nhentai",
+    "version": "1.1.3",
+    "description": "热门单本同人志：适配官方 v2 嵌套 JSON 结构，单本画廊切章注入与60s防限频缓存"
+  },
+  {
+    "name": "hitomi.la",
+    "fileName": "hitomi.js",
+    "key": "hitomi",
+    "version": "1.2.2",
+    "description": "高清图库：集成 galleryblock/nozomi LRU 缓存与 B-tree 搜索去重加速"
+  },
+  {
+    "name": "紳士漫畫",
+    "fileName": "wnacg.js",
+    "key": "wnacg",
+    "version": "1.0.11",
+    "description": "紳士漫畫：修复移动端UA选择器崩溃，支持标题作者/社团提取与4重搜索排序"
+  },
+  {
+    "name": "少年ジャンプ＋",
+    "fileName": "shonen_jump_plus.js",
+    "key": "shonen_jump_plus",
+    "version": "1.1.3",
+    "description": "集英社官方少年Jump+连载生肉漫画：iTunes 动态版本同步与详情/章节并发加速"
+  },
+  {
+    "name": "カドコミ",
+    "fileName": "comic_walker.js",
+    "key": "comic_walker",
+    "version": "1.1.0",
+    "description": "角川官方ComicWalker连载生肉漫画：升级至 1.6.0+ 特征，修复版本探活与回调异常"
+  },
+  {
+    "name": "CCC追漫台",
+    "fileName": "ccc.js",
+    "key": "ccc",
+    "version": "1.0.3",
+    "description": "台湾官方CCC创作集正版漫画：修复分类与搜索 options 空指针，关键词 URI 安全编码"
+  }
 ]
