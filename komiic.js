@@ -21,7 +21,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.2";
+  version = "1.1.3";
 
   minAppVersion = "1.0.0";
 
@@ -181,34 +181,89 @@ class Komiic extends ComicSource {
         password: pwd,
       });
 
-      if (res.status === 200) {
-        let token = null;
-        let setCookie = res.headers?.["set-cookie"] || res.headers?.["Set-Cookie"];
-        if (setCookie) {
-          let m = setCookie.match(/komiic-access-token=([^;,\s]+)/);
-          if (m) token = m[1];
+      let token = null;
+      let setCookie = res.headers?.["set-cookie"] || res.headers?.["Set-Cookie"];
+      if (setCookie) {
+        let m = setCookie.match(/komiic-access-token=([^;,\s]+)/);
+        if (m && m[1] && m[1].length > 20) {
+          token = m[1];
         }
-        if (!token && res.body) {
-          try {
-            let json = JSON.parse(res.body);
-            token = json.token || json.data?.token || json.accessToken;
-          } catch (e) {}
-        }
-        if (token) {
+      }
+      if (!token && res.body) {
+        try {
+          let json = JSON.parse(res.body);
+          token = json.token || json.data?.token || json.accessToken;
+        } catch (e) {}
+      }
+      if (!token) {
+        try {
+          let cookies = await Network.getCookies(this.baseUrl);
+          let c = cookies.find((x) => x.name === "komiic-access-token");
+          if (c && c.value && c.value.length > 20) {
+            token = c.value;
+          }
+        } catch (e) {}
+      }
+
+      if (token) {
+        try {
+          let checkRes = await Network.post(this.baseUrl + "/api/query", {
+            Referer: this.baseUrl + "/",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+            "Cookie": `komiic-access-token=${token}`,
+          }, {
+            operationName: "accountQuery",
+            query: "query accountQuery { account { id email nickname } }",
+          });
+          if (checkRes.status === 200) {
+            let checkJson = JSON.parse(checkRes.body);
+            if (checkJson.data?.account?.id && checkJson.data.account.id !== "0") {
+              this.saveData("token", token);
+              this.saveData("account", [account, pwd]);
+              return "ok";
+            }
+          }
+        } catch (e) {
           this.saveData("token", token);
           this.saveData("account", [account, pwd]);
           return "ok";
         }
-        this.saveData("account", [account, pwd]);
-        return "ok";
       }
 
-      throw `登录失败 (HTTP ${res.status}): 请检查账号密码`;
+      throw "账号或密码错误（或该账号未激活），请重新核对后登录；也可使用网页登录。";
+    },
+
+    loginWithWebview: {
+      url: "https://komiic.com/login",
+      checkStatus: (url, title) => {
+        return (
+          url.includes("komiic.com") || url.includes("komiic.cc")
+        ) && (
+          url === "https://komiic.com/" ||
+          url === "https://komiic.com" ||
+          url === "https://komiic.cc/" ||
+          url === "https://komiic.cc" ||
+          url.includes("/recentUpdate")
+        );
+      },
+      onLoginSuccess: async () => {
+        let cookies = await Network.getCookies(this.baseUrl);
+        let c = cookies.find((x) => x.name === "komiic-access-token");
+        if (c && c.value) {
+          this.saveData("token", c.value);
+        }
+      },
     },
 
     logout: () => {
       this.deleteData("token");
       this.deleteData("account");
+      try {
+        Network.deleteCookies(this.baseUrl);
+      } catch (e) {}
     },
 
     registerWebsite: "https://komiic.com/register",
