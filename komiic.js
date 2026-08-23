@@ -21,7 +21,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.3";
+  version = "1.1.4";
 
   minAppVersion = "1.0.0";
 
@@ -30,7 +30,7 @@ class Komiic extends ComicSource {
 
   // 可选访问域名，默认主站
   get baseUrl() {
-    return this.loadSetting("domain") || "https://komiic.com";
+    return this.loadSetting("domain") || "https://komiic.cc";
   }
 
   get headers() {
@@ -64,52 +64,73 @@ class Komiic extends ComicSource {
   async queryJson(query) {
     await this.ensureLogin();
 
-    let res = await Network.post(
-      this.baseUrl + "/api/query",
-      this.headers,
-      query,
-    );
-
-    if (res.status !== 200) {
-      throw `Invalid Status Code ${res.status}`;
+    let domains = [this.baseUrl];
+    if (!domains.includes("https://komiic.cc")) {
+      domains.push("https://komiic.cc");
+    }
+    if (!domains.includes("https://komiic.com")) {
+      domains.push("https://komiic.com");
     }
 
-    let json = JSON.parse(res.body);
+    let lastErr = null;
+    for (let base of domains) {
+      try {
+        let headers = {
+          ...this.headers,
+          Referer: base + "/",
+        };
+        let res = await Network.post(
+          base + "/api/query",
+          headers,
+          query,
+        );
 
-    if (json.errors != undefined) {
-      const errorInfo = json.errors[0]?.message?.toString() || "";
-      if (
-        errorInfo.indexOf("token is expired") >= 0 ||
-        errorInfo.indexOf("no token") >= 0 ||
-        errorInfo.indexOf("jwt expired") >= 0 ||
-        errorInfo.indexOf("Daily image quota exceeded") >= 0
-      ) {
-        const accountData = this.loadData("account");
-        if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
-          this.deleteData("token");
-          try {
-            await this.account.login(accountData[0], accountData[1]);
-            let retryRes = await Network.post(
-              this.baseUrl + "/api/query",
-              this.headers,
-              query,
-            );
-            if (retryRes.status === 200) {
-              let retryJson = JSON.parse(retryRes.body);
-              if (retryJson.errors == undefined) {
-                return retryJson;
-              }
-            }
-          } catch (e) {}
+        if (res.status !== 200) {
+          throw `Invalid Status Code ${res.status}`;
         }
-      }
-      if (errorInfo.indexOf("Daily image quota exceeded") >= 0) {
-        throw "Komiic 每日免登录图片配额已用尽（300张），请在漫画源设置中登录账号以获取完整额度。";
-      }
-      throw errorInfo;
-    }
 
-    return json;
+        let json = JSON.parse(res.body);
+
+        if (json.errors != undefined) {
+          const errorInfo = json.errors[0]?.message?.toString() || "";
+          if (
+            errorInfo.indexOf("token is expired") >= 0 ||
+            errorInfo.indexOf("no token") >= 0 ||
+            errorInfo.indexOf("jwt expired") >= 0 ||
+            errorInfo.indexOf("Daily image quota exceeded") >= 0
+          ) {
+            const accountData = this.loadData("account");
+            if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
+              this.deleteData("token");
+              try {
+                await this.account.login(accountData[0], accountData[1]);
+                let retryHeaders = { ...this.headers, Referer: base + "/" };
+                let retryRes = await Network.post(
+                  base + "/api/query",
+                  retryHeaders,
+                  query,
+                );
+                if (retryRes.status === 200) {
+                  let retryJson = JSON.parse(retryRes.body);
+                  if (retryJson.errors == undefined) {
+                    return retryJson;
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+          if (errorInfo.indexOf("Daily image quota exceeded") >= 0) {
+            throw "Komiic 每日免登录图片配额已用尽（300张），请在漫画源设置中登录账号以获取完整额度。";
+          }
+          throw errorInfo;
+        }
+
+        return json;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || "Komiic 连接失败";
   }
 
   async queryComics(query) {
@@ -727,13 +748,13 @@ class Komiic extends ComicSource {
       title: "访问域名",
       type: "select",
       options: [
-        { value: "https://komiic.com", text: "主站 (komiic.com)" },
         {
           value: "https://komiic.cc",
-          text: "中国大陆线路 (komiic.cc，速度更稳定)",
+          text: "中国大陆线路 (komiic.cc，免代理直连推荐)",
         },
+        { value: "https://komiic.com", text: "主站 (komiic.com，需海外代理)" },
       ],
-      default: "https://komiic.com",
+      default: "https://komiic.cc",
     },
   };
 
