@@ -57,6 +57,8 @@ def check_source(source):
     targets = {
         'copy_manga': ('https://api.copy2000.online/api/v3/system/network2?platform=3', 'GET', {'User-Agent': 'COPY/3.0.9', 'source': 'copyApp'}, None),
         'Komiic': ('https://komiic.com/api/query', 'POST', {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://komiic.com/', 'Content-Type': 'application/json'}, json.dumps({'operationName': 'allCategory', 'variables': {}, 'query': 'query allCategory { allCategory { id name } }'}).encode('utf-8')),
+        'manga_dex': ('https://api.mangadex.org/manga?limit=1&hasAvailableChapters=true', 'GET', {'User-Agent': 'VeneraX-health-check/1.0'}, None),
+        'zaimanhua': ('https://www.zaimanhua.com/', 'GET', {'User-Agent': 'Mozilla/5.0'}, None),
         'baozi': ('https://baozimhcn.com/', 'GET', {'User-Agent': 'Mozilla/5.0'}, None),
         'picacg': ('https://picaapi.picacomic.com/init', 'GET', get_pica_headers(), None),
         'jm': ('https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt', 'GET', {'User-Agent': 'Mozilla/5.0'}, None),

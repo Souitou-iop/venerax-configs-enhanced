@@ -38,6 +38,24 @@ PROBES = {
         'line_opts': '• 主站 (`komiic.com`)<br>• 大陆线路 (`komiic.cc`)',
         'advice': '• 大陆直连时主站会被 DNS 拦截，请在源设置中选择「中国大陆线路 (`komiic.cc`)」；<br>• 开启代理时选择主站速度与解析质量最佳。'
     },
+    'manga_dex': {
+        'name': 'MangaDex',
+        'url': 'https://api.mangadex.org/manga?limit=1&hasAvailableChapters=true',
+        'method': 'GET',
+        'headers': {'User-Agent': 'VeneraX-health-check/1.0'},
+        'data': None,
+        'line_opts': 'MangaDex API',
+        'advice': '• 国际多语言官方 API；大陆网络如遇超时，建议使用代理或在源设置中降低请求频率。'
+    },
+    'zaimanhua': {
+        'name': '再漫画',
+        'url': 'https://www.zaimanhua.com/',
+        'method': 'GET',
+        'headers': {'User-Agent': 'Mozilla/5.0'},
+        'data': None,
+        'line_opts': '再漫画主站',
+        'advice': '• 中文综合补充源；站点可能存在地区、反爬或登录限制，探活成功不代表每本作品都可读。'
+    },
     'baozi': {
         'name': '包子漫画',
         'url': 'https://baozimhcn.com/',

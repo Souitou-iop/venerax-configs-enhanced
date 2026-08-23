@@ -41,6 +41,20 @@ jobs:
           count=$(wc -l < /tmp/changed-configs.txt | tr -d ' ')
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
+      - name: Validate source index
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const sources = JSON.parse(fs.readFileSync('index.json', 'utf8'));
+          for (const source of sources) {
+            if (!source.fileName || !fs.existsSync(source.fileName)) {
+              throw new Error(`Missing indexed source file: ${source.fileName}`);
+            }
+          }
+          console.log(`Validated ${sources.length} indexed source files.`);
+          NODE
+          for file in *.js; do node --check "$file"; done
+
       - name: Validate changed config files
         if: steps.changed-configs.outputs.count != '0'
         run: |
