@@ -16,6 +16,22 @@
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@v1.1.7/komiic.js"
   },
   {
+    "name": "MangaDex",
+    "fileName": "manga_dex.js",
+    "key": "manga_dex",
+    "version": "1.1.1",
+    "description": "国际多语言日漫主力源：官方 API、中文/日文语言筛选与章节聚合",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manga_dex.js"
+  },
+  {
+    "name": "再漫画",
+    "fileName": "zaimanhua.js",
+    "key": "zaimanhua",
+    "version": "1.0.2",
+    "description": "中文日漫综合补充源：搜索、分类与长篇连载目录",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/zaimanhua.js"
+  },
+  {
     "name": "包子漫画",
     "fileName": "baozi.js",
     "key": "baozi",
