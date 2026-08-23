@@ -27,6 +27,21 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Validate indexed source files
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('.')
+          sources = json.loads((root / 'index.json').read_text(encoding='utf-8'))
+          for source in sources:
+              path = root / source['fileName']
+              if not path.is_file():
+                  raise SystemExit(f"Missing indexed source file: {path}")
+          print(f"Validated {len(sources)} indexed source files before probing.")
+          PY
+
       - name: Run Hybrid Health Check
         id: run_probe
         env:
