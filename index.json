@@ -11,9 +11,9 @@
     "name": "Komiic",
     "fileName": "komiic.js",
     "key": "Komiic",
-    "version": "1.1.4",
-    "description": "台版高清正版扫图：默认启用大陆免代理专线komiic.cc，支持双域名容灾回退与登录自愈",
-    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@v1.1.4/komiic.js"
+    "version": "1.1.5",
+    "description": "台版高清正版扫图：默认启用大陆免代理专线komiic.cc，支持双域名容灾回退与跨域登录态修复",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@v1.1.5/komiic.js"
   },
   {
     "name": "包子漫画",

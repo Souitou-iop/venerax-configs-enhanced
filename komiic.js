@@ -21,7 +21,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.4";
+  version = "1.1.5";
 
   minAppVersion = "1.0.0";
 
@@ -46,6 +46,26 @@ class Komiic extends ComicSource {
       headers["Cookie"] = `komiic-access-token=${token}`;
     }
     return headers;
+  }
+
+  _tokenFromCookies(cookies) {
+    if (!Array.isArray(cookies)) return null;
+    let cookie = cookies.find(
+      (item) => item?.name === "komiic-access-token" && item?.value,
+    );
+    return cookie?.value || null;
+  }
+
+  async _loadWebToken() {
+    // 登录页固定在 komiic.com，而大陆线路默认是 komiic.cc；两者的
+    // host-only cookie 不会互相返回，不能只读取当前 baseUrl。
+    for (let domain of [this.baseUrl, "https://komiic.com", "https://komiic.cc"]) {
+      try {
+        let token = this._tokenFromCookies(await Network.getCookies(domain));
+        if (token) return token;
+      } catch (e) {}
+    }
+    return null;
   }
 
   // 修复封面域名：将 public.komiic.com 替换为 public.komiic.cc
@@ -217,13 +237,7 @@ class Komiic extends ComicSource {
         } catch (e) {}
       }
       if (!token) {
-        try {
-          let cookies = await Network.getCookies(this.baseUrl);
-          let c = cookies.find((x) => x.name === "komiic-access-token");
-          if (c && c.value && c.value.length > 20) {
-            token = c.value;
-          }
-        } catch (e) {}
+        token = await this._loadWebToken();
       }
 
       if (token) {
@@ -271,10 +285,9 @@ class Komiic extends ComicSource {
         );
       },
       onLoginSuccess: async () => {
-        let cookies = await Network.getCookies(this.baseUrl);
-        let c = cookies.find((x) => x.name === "komiic-access-token");
-        if (c && c.value) {
-          this.saveData("token", c.value);
+        let token = await this._loadWebToken();
+        if (token) {
+          this.saveData("token", token);
         }
       },
     },
@@ -282,9 +295,11 @@ class Komiic extends ComicSource {
     logout: () => {
       this.deleteData("token");
       this.deleteData("account");
-      try {
-        Network.deleteCookies(this.baseUrl);
-      } catch (e) {}
+      for (let domain of [this.baseUrl, "https://komiic.com", "https://komiic.cc"]) {
+        try {
+          Network.deleteCookies(domain);
+        } catch (e) {}
+      }
     },
 
     registerWebsite: "https://komiic.com/register",
