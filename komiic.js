@@ -1,5 +1,19 @@
 class Komiic extends ComicSource {
-  init() {}
+  init() {
+    this.ensureLogin();
+  }
+
+  async ensureLogin() {
+    let token = this.loadData("token");
+    if (!token) {
+      const accountData = this.loadData("account");
+      if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
+        try {
+          await this.account.login(accountData[0], accountData[1]);
+        } catch (e) {}
+      }
+    }
+  }
 
   // 此漫画源的名称
   name = "Komiic";
@@ -7,7 +21,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.1";
+  version = "1.1.2";
 
   minAppVersion = "1.0.0";
 
@@ -48,6 +62,8 @@ class Komiic extends ComicSource {
   }
 
   async queryJson(query) {
+    await this.ensureLogin();
+
     let res = await Network.post(
       this.baseUrl + "/api/query",
       this.headers,
@@ -65,12 +81,26 @@ class Komiic extends ComicSource {
       if (
         errorInfo.indexOf("token is expired") >= 0 ||
         errorInfo.indexOf("no token") >= 0 ||
-        errorInfo.indexOf("jwt expired") >= 0
+        errorInfo.indexOf("jwt expired") >= 0 ||
+        errorInfo.indexOf("Daily image quota exceeded") >= 0
       ) {
         const accountData = this.loadData("account");
         if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
-          await this.account.login(accountData[0], accountData[1]);
-          return await this.queryJson(query);
+          this.deleteData("token");
+          try {
+            await this.account.login(accountData[0], accountData[1]);
+            let retryRes = await Network.post(
+              this.baseUrl + "/api/query",
+              this.headers,
+              query,
+            );
+            if (retryRes.status === 200) {
+              let retryJson = JSON.parse(retryRes.body);
+              if (retryJson.errors == undefined) {
+                return retryJson;
+              }
+            }
+          } catch (e) {}
         }
       }
       if (errorInfo.indexOf("Daily image quota exceeded") >= 0) {
