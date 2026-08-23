@@ -29,7 +29,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.6";
+  version = "1.1.7";
 
   minAppVersion = "1.0.0";
 
@@ -282,15 +282,17 @@ class Komiic extends ComicSource {
     loginWithWebview: {
       url: "https://komiic.com/login",
       checkStatus: (url, title) => {
-        return (
-          url.includes("komiic.com") || url.includes("komiic.cc")
-        ) && (
-          url === "https://komiic.com/" ||
-          url === "https://komiic.com" ||
-          url === "https://komiic.cc/" ||
-          url === "https://komiic.cc" ||
-          url.includes("/recentUpdate")
-        );
+        if (typeof url !== "string") return false;
+        let isKomiic =
+          url.indexOf("https://komiic.com") === 0 ||
+          url.indexOf("https://komiic.cc") === 0;
+        if (!isKomiic) return false;
+
+        // 登录后可能停在喜爱书籍、账户页或首页，不要只匹配 recentUpdate。
+        // 只要已经离开登录页，就让 VeneraX 保存 WebView Cookie 并关闭页面。
+        let path = url.split("?")[0].split("#")[0].replace(/\/+$/, "");
+        return path !== "https://komiic.com/login" &&
+          path !== "https://komiic.cc/login";
       },
       onLoginSuccess: async () => {
         let token = await this._loadWebToken();
