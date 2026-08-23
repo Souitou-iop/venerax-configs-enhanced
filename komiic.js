@@ -5,13 +5,21 @@ class Komiic extends ComicSource {
 
   async ensureLogin() {
     let token = this.loadData("token");
-    if (!token) {
-      const accountData = this.loadData("account");
-      if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
-        try {
-          await this.account.login(accountData[0], accountData[1]);
-        } catch (e) {}
-      }
+    if (token) return;
+
+    // WebView 登录回调是异步的；请求开始前再次从 Cookie 同步 Token，避免
+    // 回调尚未完成时被当作游客请求。
+    token = await this._loadWebToken();
+    if (token) {
+      this.saveData("token", token);
+      return;
+    }
+
+    const accountData = this.loadData("account");
+    if (accountData && Array.isArray(accountData) && accountData.length >= 2) {
+      try {
+        await this.account.login(accountData[0], accountData[1]);
+      } catch (e) {}
     }
   }
 
@@ -21,7 +29,7 @@ class Komiic extends ComicSource {
   // 唯一标识符
   key = "Komiic";
 
-  version = "1.1.5";
+  version = "1.1.6";
 
   minAppVersion = "1.0.0";
 
