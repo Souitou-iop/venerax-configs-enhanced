@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga"
 
-    version = "1.5.1"
+    version = "1.6.0"
 
     minAppVersion = "1.6.0"
 
@@ -712,22 +712,23 @@ class CopyManga extends ComicSource {
             let comicUrl = this.copyRegion === "0" || !reqId
                 ? `${this.apiUrl}/api/v3/comic2/${id}?in_mainland=false&platform=3`
                 : `${this.apiUrl}/api/v3/comic2/${id}?in_mainland=true&request_id=${reqId}&platform=3`;
-            let results = await Promise.all([
-                Network.get(comicUrl, this.headers),
-                getFavoriteStatus.bind(this)(id)
-            ])
-
-            if (results[0].status !== 200) {
-                if (results[0].status === 210) {
+            // Keep the detail request and favorite lookup serial to avoid a burst.
+            let comicRes = await Network.get(comicUrl, this.headers);
+            if (comicRes.status !== 200) {
+                if (comicRes.status === 210) {
                     try {
-                        let errObj = JSON.parse(results[0].body);
+                        let errObj = JSON.parse(comicRes.body);
                         throw errObj.message || errObj.results?.detail || "作品不可用或受限";
                     } catch (e) {
                         if (typeof e === 'string') throw e;
                     }
                 }
-                throw `Invalid status code: ${results[0].status}`;
+                throw `Invalid status code: ${comicRes.status}`;
             }
+            let results = [
+                comicRes,
+                await getFavoriteStatus.bind(this)(id)
+            ]
 
             let resBody = JSON.parse(results[0].body);
             if (!resBody.results || !resBody.results.comic) {
@@ -773,6 +774,9 @@ class CopyManga extends ComicSource {
             let attempt = 0;
             const maxAttempts = 3;
             let lastErr = "章节加载失败";
+            let failFast = (message) => {
+                throw { copyMangaFailFast: true, message: message };
+            };
 
             let endpoints = [this.apiUrl];
             for (let ep of CopyManga.apiEndpoints) {
@@ -795,39 +799,29 @@ class CopyManga extends ComicSource {
 
                         if (res.status === 210) {
                             let errMsg = "";
-                            let isWaitLimit = false;
-                            let waitTime = 1500;
+                            let waitSeconds = 0;
                             try {
                                 let body = JSON.parse(res.body);
                                 errMsg = body.message || body.results?.detail || "";
-                                if (errMsg.includes("Expected available in")) {
-                                    isWaitLimit = true;
-                                    let match = errMsg.match(/(\d+)\s*seconds/);
-                                    if (match && match[1]) {
-                                        waitTime = Math.min(parseInt(match[1]) * 1000, 3000);
-                                    }
+                                let match = errMsg.match(/Expected available in\s+(\d+)\s*seconds/i);
+                                if (match && match[1]) {
+                                    waitSeconds = parseInt(match[1]);
                                 }
                             } catch (e) {}
 
-                            // If rate-limited with wait time, backoff briefly and retry
-                            if (isWaitLimit) {
-                                await new Promise(r => setTimeout(r, waitTime));
+                            if (waitSeconds > 0) {
+                                // Do not sleep past the reader timeout; surface long server waits clearly.
+                                if (waitSeconds > 25) {
+                                    failFast(`拷贝漫画限频，请等待 ${waitSeconds} 秒后重试`);
+                                }
+                                await new Promise(r => setTimeout(r, waitSeconds * 1000 + 200));
                                 attempt++;
                                 continue;
                             }
 
-                            // If blocked by 210 anti-crack/token fingerprint:
-                            // 1. If currently using user token, clear token to fallback to clean guest mode
-                            let curToken = this.loadData("token");
-                            if (curToken) {
-                                this.deleteData("token");
-                            }
-                            // 2. Rotate device fingerprints
-                            this.saveData("_deviceinfo", CopyManga.generateDeviceInfo());
-                            this.saveData("_device", CopyManga.generateDevice());
-                            this.saveData("_pseudoid", CopyManga.generatePseudoid());
-                            lastErr = errMsg || "210 风控拦截";
-                            break; // Try next mirror endpoint
+                            // Account/device restrictions are not fixed by deleting the user's login
+                            // or rotating identifiers, and mirror retries only amplify the block.
+                            failFast(errMsg || "拷贝漫画返回 210 风控限制，请稍后重试或使用官方客户端");
                         }
 
                         if (res.status !== 200) {
@@ -860,6 +854,9 @@ class CopyManga extends ComicSource {
                             images: images,
                         };
                     } catch (e) {
+                        if (e && e.copyMangaFailFast) {
+                            throw e.message;
+                        }
                         lastErr = e.toString();
                         attempt++;
                     }
