@@ -4,7 +4,7 @@ class CopyManga extends ComicSource {
 
     key = "copy_manga"
 
-    version = "1.6.0"
+    version = "1.6.1"
 
     minAppVersion = "1.6.0"
 
@@ -156,7 +156,8 @@ class CopyManga extends ComicSource {
     static apiEndpoints = [
         'api.copy2000.online',
         'api.copy-manga.com',
-        'api.mangacopy.com'
+        'api.mangacopy.com',
+        'api.copy202601.com'
     ];
 
     get apiUrl() {

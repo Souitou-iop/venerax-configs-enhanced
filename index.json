@@ -3,8 +3,8 @@
     "name": "拷贝漫画",
     "fileName": "copy_manga.js",
     "key": "copy_manga",
-    "version": "1.6.0",
-    "description": "保留登录态，区分210限频与账号风控，避免静默降级和镜像重试放大封禁，串行详情请求",
+    "version": "1.6.1",
+    "description": "保留登录态，区分210限频与账号风控，新增 api.copy202601.com 动态备用线路容灾",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/copy_manga.js"
   },
   {

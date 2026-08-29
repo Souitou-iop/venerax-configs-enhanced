@@ -21,9 +21,14 @@ from datetime import datetime, timezone, timedelta
 PROBES = {
     'copy_manga': {
         'name': '拷贝漫画',
-        'url': 'https://api.copy2000.online/api/v3/system/network2?platform=3',
+        'url': 'https://api.copy2000.online/api/v3/comics?limit=1',
+        'fallback_urls': [
+            'https://api.copy-manga.com/api/v3/comics?limit=1',
+            'https://api.mangacopy.com/api/v3/comics?limit=1',
+            'https://api.copy202601.com/api/v3/comics?limit=1'
+        ],
         'method': 'GET',
-        'headers': {'User-Agent': 'COPY/3.0.9', 'source': 'copyApp'},
+        'headers': {'User-Agent': 'COPY/3.0.9', 'source': 'copyApp', 'version': '3.0.9', 'platform': '3'},
         'data': None,
         'line_opts': '• 大陆线路 (`Region 1`)<br>• 海外线路 (`Region 0`)',
         'advice': '• **强烈推荐全局保持「海外线路」**：直连省去 3.3s 国内广告握手，代理下秒级响应；<br>• 大陆线路强制请求国内广告 ID 且易触发 210 限频风控。'
@@ -230,35 +235,44 @@ def probe_local_proxy():
     print("🌍 正在测试 [海外代理环境] (3次平滑采样)...")
     results = {}
     for key, p in PROBES.items():
-        url = p['url']
+        urls_to_try = [p['url']]
+        if p.get('fallback_urls'):
+            urls_to_try.extend(p['fallback_urls'])
+            
         method = p['method']
         headers = p['headers'] or (get_pica_headers() if key == 'picacg' else {'User-Agent': 'Mozilla/5.0'})
         data = p['data']
         
-        latencies = []
-        codes = []
-        for _ in range(3):
-            req = urllib.request.Request(url, data=data, headers=headers, method=method)
-            t0 = time.time()
-            try:
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    resp.read(512)
+        probe_success = False
+        for url in urls_to_try:
+            latencies = []
+            codes = []
+            for _ in range(3):
+                req = urllib.request.Request(url, data=data, headers=headers, method=method)
+                t0 = time.time()
+                try:
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        resp.read(512)
+                        latencies.append(int((time.time() - t0) * 1000))
+                        codes.append(resp.status)
+                except urllib.error.HTTPError as e:
                     latencies.append(int((time.time() - t0) * 1000))
-                    codes.append(resp.status)
-            except urllib.error.HTTPError as e:
-                latencies.append(int((time.time() - t0) * 1000))
-                codes.append(e.code)
-            except Exception:
-                codes.append('ERR')
-            time.sleep(0.1)
-            
-        valid_lats = [l for l in latencies if l > 0]
-        if any(c != 'ERR' for c in codes) and valid_lats:
-            avg_lat = sum(valid_lats) // len(valid_lats)
-            code = [c for c in codes if c != 'ERR'][0]
-            results[key] = {'latency': avg_lat, 'code': code}
-        else:
+                    codes.append(e.code)
+                except Exception:
+                    codes.append('ERR')
+                time.sleep(0.1)
+                
+            valid_lats = [l for l in latencies if l > 0]
+            if any(c != 'ERR' for c in codes) and valid_lats:
+                avg_lat = sum(valid_lats) // len(valid_lats)
+                code = [c for c in codes if c != 'ERR'][0]
+                results[key] = {'latency': avg_lat, 'code': code}
+                probe_success = True
+                break
+                
+        if not probe_success:
             results[key] = {'latency': -1, 'code': 'ERR'}
+            
         print(f"  [{key:16}] 代理延迟: {results[key]['latency']}ms, 状态码: {results[key]['code']}")
     return results
 
