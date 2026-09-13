@@ -1379,7 +1379,10 @@ def write_readme_section(readme_section):
     if a < 0 or b < 0 or a >= b:
         print('[WARN] README markers missing; real README was not modified')
         return False
-    Path(path).write_text(text[:a] + readme_section.rstrip() + '\n\n' + text[b:], encoding='utf-8')
+    section = readme_section.rstrip()
+    if section.endswith(end):
+        section = section[:-len(end)].rstrip()
+    Path(path).write_text(text[:a] + section + '\n\n' + text[b:], encoding='utf-8')
     return True
 
 
