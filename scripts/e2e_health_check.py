@@ -1234,7 +1234,13 @@ def conn_probe(key):
     if code == 401:
         return result('LOGIN_REQUIRED', 'conn', code=code, steps=steps)
     if code in (403, 429):
-        return result('BLOCKED', 'conn', code=code, detail=f"HTTP {code} —— 现行探针对此亮绿灯", steps=steps)
+        if key == 'ikmmh':
+            # 爱看漫真实域名仅大陆网络可达, 海外/代理网络永久 403, 属已知网络限制而非站点故障。
+            detail = (f"HTTP {code} —— 站点拦截海外/机房网络；"
+                      "www.ikmmh.com 仅大陆网络可达, 出海或代理环境无法使用")
+        else:
+            detail = f"HTTP {code} —— 现行探针对此亮绿灯"
+        return result('BLOCKED', 'conn', code=code, detail=detail, steps=steps)
     if code == 210:
         return result('RISK_CONTROL', 'conn', code=code, steps=steps)
     if code == 'ERR':
