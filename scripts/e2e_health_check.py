@@ -128,6 +128,32 @@ VERDICT_BADGE = {
     'NOT_IMPLEMENTED':'⚪ **内容级待接入**',
 }
 
+# 异常源报告用的人话解释: 判定 -> (问题标题, 一句话说明)
+PROBLEM_EXPLAIN = {
+    'DOWN':           '❌ **无法连通** —— 服务器完全无响应',
+    'BLOCKED':        '🔴 **请求被拦截** (403/429) —— 无法确认内容是否可用',
+    'RISK_CONTROL':   '🟠 **风控/限频 —— 图片加载不出** —— 接口活着但读内容被限制',
+    'LOGIN_REQUIRED': '🟡 **需要登录** —— 游客身份看不到内容',
+    'ERROR':          '⚠️ **探测异常** —— 返回了意料之外的内容，需人工关注',
+}
+
+
+def build_problem_report(overseas):
+    """README 异常源报告: 只列有问题的源, 用大白话说明哪个源出了什么事。"""
+    problems = [(k, v) for k, v in overseas.items() if v['verdict'] in PROBLEM_EXPLAIN]
+    if not problems:
+        n_content = sum(1 for v in overseas.values() if v['tier'] == 'content')
+        n_ok = sum(1 for v in overseas.values() if v['verdict'] == 'OK_CONTENT')
+        return (f"### ✅ 本次探测未发现异常源\n\n"
+                f"内容级探测覆盖 {n_content} 个源，其中 **{n_ok} 个真实下载到漫画图片**，其余为需登录/风控冷却等非故障状态。\n\n")
+    md = f"### 🚨 异常源报告（本次探测发现 {len(problems)} 个源存在问题）\n\n"
+    md += ("> 以下判定来自端到端内容级探测（真实走完 搜索→详情→章节→下载图片），"
+           "不是单纯的服务器连通性检查。\n\n")
+    md += "| 漫画源 | 出了什么问题 | 具体情况 |\n| :--- | :--- | :--- |\n"
+    for k, v in problems:
+        md += f"| **{hhc.PROBES[k]['name']}** | {PROBLEM_EXPLAIN[v['verdict']]} | {v['detail'] or '—'} |\n"
+    return md + "\n"
+
 
 def mainland_badge(latency_ms, code):
     """现行 format_badge 的修复版：403/429/210 不再给绿灯。"""
@@ -641,6 +667,45 @@ def e2e_picacg():
 
 # ---------------------------------------------------------------- 连通级兜底探针（复用 hybrid PROBES 配置）
 
+# 禁漫的 cdn* 域名是纯 API 网关: 首页路径一律 403 (设计如此, 并非封锁)。
+# 探针目标换成 jm.js 真实使用的 /setting API 路径 (海外列与大陆 Globalping 列共用)。
+JM_DOMAINS = ['www.cdnhjk.net', 'www.cdngwc.cc', 'www.cdngwc.net', 'www.cdngwc.club', 'www.cdnutc.me']
+hhc.PROBES['jm']['url'] = f"https://{JM_DOMAINS[3]}/setting?app_img_shunt=0&express="
+
+
+def jm_app_headers():
+    return {
+        "User-Agent": ("Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36"),
+        "Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Origin": "https://localhost", "Referer": "https://localhost/",
+        "X-Requested-With": "com.example.app",
+    }
+
+
+def e2e_jm():
+    """禁漫天堂：按 jm.js 真实用法调 /setting API + App 专属头, 5 个官方域名故障转移。
+    内容接口响应 AES 加密, 无法做内容级, 故为数据级。"""
+    steps = []
+    h = jm_app_headers()
+    last_code = None
+    for domain in JM_DOMAINS:
+        code, body, ms = http_req(f"https://{domain}/setting?app_img_shunt=0&express=",
+                                  headers=h, timeout=10)
+        steps.append(f"{domain}/setting → HTTP {code} ({ms}ms)")
+        last_code = code
+        if code == 200:
+            d = json_body(body)
+            if d and d.get('code') == 200:
+                return result('OK_DATA', 'data', latency=ms, code=200,
+                              detail=f"网关 API 正常 ({domain}); 内容接口 AES 加密, 未做内容级探测", steps=steps)
+    if last_code in (403, 429):
+        return result('BLOCKED', 'data', code=last_code, detail="全部官方域名被拦截", steps=steps)
+    if last_code == 'ERR':
+        return result('DOWN', 'data', code=last_code, detail="全部官方域名无法连接", steps=steps)
+    return result('ERROR', 'data', code=last_code, detail=f"全部域名响应异常 (最后 HTTP {last_code})", steps=steps)
+
+
 def conn_probe(key):
     p = hhc.PROBES[key]
     headers = p.get('headers')
@@ -674,7 +739,7 @@ CONTENT_PROBES = {
     'hitomi': e2e_hitomi,
     'wnacg': e2e_wnacg,
 }
-DATA_PROBES = {'picacg': e2e_picacg}
+DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm}
 
 
 def run_overseas():
@@ -719,6 +784,7 @@ def build_readme_section(overseas, mainland, engine_name):
     dual_time = get_dual_time_str(False)
     start_marker = "## 🧭 各漫画源最佳线路与网络推荐指南 (Recommended Lines)"
     end_marker = "## 🛠️ 重点修复与更新日志 (Changelog)"
+    problem_report = build_problem_report(overseas)
 
     md = f"""{start_marker}
 
@@ -727,7 +793,7 @@ def build_readme_section(overseas, mainland, engine_name):
 > 🔬 **探测深度**：`内容级` = 真实走完 搜索→详情→章节→下载图片字节 并校验图片格式；`数据级` = 业务接口返回可解析数据；`连通级` = 仅状态码  
 > 🚦 **判定口径（诚实版）**：🟢 端到端正常/数据正常/可连通 ｜ 🟠 风控·限频·配额耗尽 ｜ 🟡 需登录 ｜ 🔴 被拦截 (403/429/210，**不再亮绿灯**) ｜ ❌ 无法直连
 
-| 漫画源 | 线路 / 分流选项 | 探测深度 | 大陆骨干直连实测 | 海外代理实测 (端到端判定) | 实测说明 |
+{problem_report}| 漫画源 | 线路 / 分流选项 | 探测深度 | 大陆骨干直连实测 | 海外代理实测 (端到端判定) | 实测说明 |
 | :--- | :--- | :---: | :---: | :---: | :--- |
 """
     for key, p in hhc.PROBES.items():
