@@ -1130,17 +1130,20 @@ def e2e_manhuagui():
         return result('ERROR', 'content', detail=f"章节数据解包失败: {e}", steps=steps)
     if not files:
         return result('ERROR', 'content', detail="解包后无图片文件列表", steps=steps)
-    img_url = f"https://us.hamreus.com{path}{files[0]}"
-    if sl.get('e') is not None:
-        img_url += f"?e={sl['e']}&m={sl['m']}"
+    qs = f"?e={sl['e']}&m={sl['m']}" if sl.get('e') is not None else ""
     steps.append(f"解包出 {len(files)} 张图")
 
-    code, body, ms = http_req(img_url, headers=h, timeout=15)
-    kind = img_magic(body)
-    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
-    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
-        return result('OK_CONTENT', 'content', latency=ms, code=200,
-                      detail=f"端到端成功: {len(body)} 字节 {kind} (LZString 解包)", steps=steps)
+    code, body, ms, kind = 'ERR', b'', -1, None
+    for domain in ('us.hamreus.com', 'i.hamreus.com'):
+        code, body, ms = http_req(f"https://{domain}{path}{files[0]}{qs}", headers=h, timeout=15)
+        kind = img_magic(body)
+        steps.append(f"下载 {domain} → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+        if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+            return result('OK_CONTENT', 'content', latency=ms, code=200,
+                          detail=f"端到端成功: {len(body)} 字节 {kind} (LZString 解包)", steps=steps)
+    if code == 'ERR':
+        return result('ERROR', 'content',
+                      detail=f"章节数据解包成功({len(files)} 张图), 但图片 CDN 从当前网络不可达", steps=steps)
     return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
 
 
