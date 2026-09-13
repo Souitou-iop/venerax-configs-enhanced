@@ -35,6 +35,7 @@ import ssl
 import struct
 import sys
 import time
+import uuid
 import base64
 import hashlib
 import hmac as hmac_mod
@@ -107,6 +108,112 @@ def json_body(body):
         return json.loads(body.decode("utf-8", "ignore"))
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------- JS packer / LZString 解码工具
+
+_B36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+
+
+def _packer_e(n, a):
+    """Dean Edwards packer 的 e(c): 数字按进制 a 编码 (JS toString(36) + charCode 变体)。"""
+    pre = _packer_e(n // a, a) if n >= a else ''
+    n = n % a
+    return pre + (chr(n + 29) if n > 35 else _B36[n])
+
+
+def unpack_packer_words(raw_p, a, c, k):
+    """manhuaren 式解包: d[e(i)] = k[i] || e(i), 再把 payload 里全部单词查表替换。"""
+    d = {}
+    for i in range(c - 1, -1, -1):
+        w = k[i] if i < len(k) else ''
+        d[_packer_e(i, a)] = w or _packer_e(i, a)
+    return re.sub(r'\b\w+\b', lambda m: d.get(m.group(0), m.group(0)), raw_p)
+
+
+def unpack_packer_tokens(raw_p, a, c, k):
+    """manhuagui 式解包: 仅把 payload 中出现在词典里的 token 逐个替换。"""
+    out = raw_p
+    for i in range(c - 1, -1, -1):
+        if i < len(k) and k[i]:
+            out = re.sub(r'\b%s\b' % re.escape(_packer_e(i, a)),
+                         lambda m, rep=k[i]: rep, out)
+    return out
+
+
+def lzstring_decompress_b64(s):
+    """LZString.decompressFromBase64 的 Python 移植 (与 manhuagui.js 内置实现逐行对应)。"""
+    if s is None:
+        return ""
+    if s == "":
+        return None
+    key_str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+    base_rev = {ch: i for i, ch in enumerate(key_str)}
+    length, reset_value = len(s), 32
+    get_next = lambda i: base_rev[s[i]]
+    dictionary = [0, 1, 2]
+    enlarge_in, dict_size, num_bits = 4, 4, 3
+    result = []
+    data = {"val": get_next(0), "position": reset_value, "index": 1}
+
+    def read_bits(maxpower):
+        bits, power = 0, 1
+        while power != maxpower:
+            resb = data["val"] & data["position"]
+            data["position"] >>= 1
+            if data["position"] == 0:
+                data["position"] = reset_value
+                data["val"] = get_next(data["index"])
+                data["index"] += 1
+            bits |= (1 if resb > 0 else 0) * power
+            power <<= 1
+        return bits
+
+    nxt = read_bits(4)
+    if nxt == 0:
+        c = chr(read_bits(256))
+    elif nxt == 1:
+        c = chr(read_bits(65536))
+    elif nxt == 2:
+        return ""
+    else:
+        return None
+    dictionary.append(c)
+    w = c
+    result.append(c)
+    while True:
+        if data["index"] > length:
+            return ""
+        c = read_bits(1 << num_bits)
+        if c == 0:
+            dictionary.append(chr(read_bits(256)))
+            c = dict_size
+            dict_size += 1
+            enlarge_in -= 1
+        elif c == 1:
+            dictionary.append(chr(read_bits(65536)))
+            c = dict_size
+            dict_size += 1
+            enlarge_in -= 1
+        elif c == 2:
+            return "".join(result)
+        if enlarge_in == 0:
+            enlarge_in = 1 << num_bits
+            num_bits += 1
+        if c < len(dictionary) and dictionary[c]:
+            entry = dictionary[c]
+        elif c == dict_size:
+            entry = w + w[0]
+        else:
+            return None
+        result.append(entry)
+        dictionary.append(w + entry[0])
+        dict_size += 1
+        enlarge_in -= 1
+        w = entry
+        if enlarge_in == 0:
+            enlarge_in = 1 << num_bits
+            num_bits += 1
 
 
 def result(verdict, tier, latency=-1, code=None, detail="", steps=None):
@@ -762,6 +869,281 @@ def e2e_baozi():
     return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
 
 
+def e2e_manhuaren():
+    """漫画人 (dm5 系): 章节页内嵌 Dean Edwards packer 混淆的图片数组, 解包后取图。
+    链路: 搜索 → 详情(/m{章节ID}/) → 章节页 → 解包 → 下载(Referer=章节页, key 随会话刷新)。"""
+    steps = []
+    base = "https://www.manhuaren.com"
+    h = {"User-Agent": UA_BROWSER, "Referer": base + "/"}
+    code, body, ms = http_req(f"{base}/search?title=%E6%B5%B7%E8%B4%BC%E7%8E%8B&language=1&page=1",
+                              headers=h, timeout=15)
+    steps.append(f"搜索 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', code=code, steps=steps)
+    m = re.search(rb'href="(/manhua-[a-zA-Z0-9-]+/)"', body)
+    if not m:
+        return result('ERROR', 'content', detail="搜索页无漫画链接", steps=steps)
+    slug = m.group(1).decode()
+
+    code, body, ms = http_req(f"{base}{slug}", headers=h, timeout=15)
+    steps.append(f"详情 {slug[:26]} → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, steps=steps)
+    chs = re.findall(rb'href="(/m\d+/)"', body)
+    if not chs:
+        return result('ERROR', 'content', detail="详情页无章节链接", steps=steps)
+    ch_url = base + chs[0].decode()
+
+    code, body, ms = http_req(ch_url, headers=h, timeout=15)
+    steps.append(f"章节页 → HTTP {code} ({ms}ms)")
+    ps = re.search(rb'eval\(function\(p,a,c,k,e,d\)(.*?)</script>', body, re.S)
+    if not ps:
+        return result('RISK_CONTROL', 'content', detail="章节页无 packer 脚本（可能为付费/下架章节）", steps=steps)
+    s = ps.group(1).decode('utf-8', 'ignore')
+    try:
+        p_start = s.index("}('") + 3
+        bm = re.search(r"',(\d+),(\d+),'", s[p_start:])
+        boundary = p_start + bm.start()
+        raw_p = s[p_start:boundary]
+        k_start = boundary + len(bm.group(0))
+        raw_k = s[k_start:s.index("'.split", k_start)]
+        decrypted = unpack_packer_words(raw_p, int(bm.group(1)), int(bm.group(2)), raw_k.split('|'))
+        arr = re.search(r'\[(.*?)\]', decrypted, re.S)
+        imgs = [re.sub(r"^\\?['\"]|\\?['\"]$", '', x.strip()) for x in arr.group(1).split(',')]
+        imgs = [u for u in imgs if u.startswith('http')]
+    except Exception as e:
+        return result('ERROR', 'content', detail=f"packer 解包失败: {e}", steps=steps)
+    if not imgs:
+        return result('ERROR', 'content', detail="解包后无图片 URL", steps=steps)
+    steps.append(f"解包出 {len(imgs)} 张图")
+
+    code, body, ms = http_req(imgs[0], headers={"User-Agent": UA_BROWSER, "Referer": ch_url}, timeout=15)
+    kind = img_magic(body)
+    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind} (packer 解包)", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
+def e2e_shonen_jump_plus():
+    """少年Jump+: 匿名设备 token → GraphQL(搜索→章节列表→免费话 viewer) → 图片(带 X-Giga-Page-Image-Auth)。"""
+    steps = []
+    h = {"Origin": "https://shonenjumpplus.com", "Referer": "https://shonenjumpplus.com/",
+         "X-Giga-Device-Id": uuid.uuid4().hex, "User-Agent": UA_BROWSER}
+    code, body, ms = http_req('https://shonenjumpplus.com/api/v1/user_account/access_token',
+                              headers=h, data=b'', method='POST', timeout=12)
+    steps.append(f"匿名 token → HTTP {code} ({ms}ms)")
+    tok = json_body(body).get('access_token') if code == 200 else None
+    if not tok:
+        return result('DOWN' if code == 'ERR' else 'ERROR', 'content', code=code, steps=steps)
+    gh = {**h, "Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+
+    def gql(op, variables, query):
+        return http_req('https://shonenjumpplus.com/api/v1/graphql', headers=gh,
+                        data=json.dumps({"operationName": op, "variables": variables,
+                                         "query": query}).encode(), method='POST', timeout=15)
+
+    code, body, ms = gql("SearchResult", {"keyword": "SPY×FAMILY"},
+        "query SearchResult($after: String, $keyword: String!) { search(after: $after, first: 50, "
+        "keyword: $keyword, types: [SERIES,MAGAZINE_LABEL]) { edges { node { __typename ... on Series { id databaseId title } } } } }")
+    steps.append(f"GraphQL 搜索 → HTTP {code} ({ms}ms)")
+    series = None
+    if code == 200:
+        try:
+            for e in json_body(body)["data"]["search"]["edges"]:
+                if e["node"]["__typename"] == "Series":
+                    series = e["node"]
+                    break
+        except Exception:
+            pass
+    if not series:
+        return result('ERROR', 'content', detail="搜索无系列结果", steps=steps)
+
+    code, body, ms = gql("SeriesDetailEpisodeList",
+        {"id": str(series["databaseId"]), "episodeOffset": 0, "episodeFirst": 5, "episodeSort": "NUMBER_ASC"},
+        "query SeriesDetailEpisodeList($id: String!, $episodeOffset: Int, $episodeFirst: Int, "
+        "$episodeSort: ReadableProductSorting) { series(databaseId: $id) { episodes: readableProducts"
+        "(types: [EPISODE], first: $episodeFirst, offset: $episodeOffset, sort: $episodeSort) "
+        "{ edges { node { databaseId title } } } } }")
+    steps.append(f"章节列表 ({series['title'][:12]}) → HTTP {code} ({ms}ms)")
+    eps = []
+    if code == 200:
+        try:
+            eps = [e["node"] for e in json_body(body)["data"]["series"]["episodes"]["edges"]]
+        except Exception:
+            pass
+    if not eps:
+        return result('ERROR', 'content', detail="拿不到章节列表", steps=steps)
+
+    ep_data = None
+    for ep in eps[:3]:
+        code, body, ms = gql("EpisodeViewerConditionallyCacheable", {"episodeID": str(ep["databaseId"])},
+            "query EpisodeViewerConditionallyCacheable($episodeID: String!) { episode(databaseId: $episodeID) "
+            "{ id pageImages { edges { node { src } } } pageImageToken purchaseInfo { isFree hasPurchased hasRented } } }")
+        steps.append(f"viewer 第{ep['databaseId'][-4:]}话 → HTTP {code} ({ms}ms)")
+        d = json_body(body) if code == 200 else None
+        d = (d or {}).get("data", {}).get("episode") or {}
+        if d.get("purchaseInfo", {}).get("isFree") and d.get("pageImages", {}).get("edges"):
+            ep_data = d
+            break
+    if not ep_data:
+        return result('LOGIN_REQUIRED', 'content', detail="前几话均非免费（需点数购买/租借）", steps=steps)
+
+    img_src = ep_data["pageImages"]["edges"][0]["node"]["src"]
+    token = ep_data.get("pageImageToken") or ""
+    code, body, ms = http_req(img_src, headers={**h, "X-Giga-Page-Image-Auth": token}, timeout=15)
+    kind = img_magic(body)
+    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind} (免费话真实图片)", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
+def e2e_comic_walker():
+    """カドコミ: 匿名设备注册 → 首页免费专区取漫画 → 章节 → viewer manuscripts → XOR(drm_hash) 还原图片。
+    搜索接口已废弃(恒空), 漫画发现走 v2/screens/home 的首次免费专区。"""
+    steps = []
+    H = {"X-API-Environment-Key": "ytBrdQ2ZYdRQguqEusVLxQVUgakNnVht",
+         "User-Agent": "BookWalkerApp/1.6.3 (Android 13)", "Content-Type": "application/json"}
+    code, body, ms = http_req('https://mobileapp.comic-walker.com/v1/users',
+                              headers=H, data=b'', method='POST', timeout=12)
+    steps.append(f"匿名设备注册 → HTTP {code} ({ms}ms)")
+    tok = json_body(body).get('resources', {}).get('access_token') if code == 200 else None
+    if not tok:
+        return result('DOWN' if code == 'ERR' else 'ERROR', 'content', code=code, steps=steps)
+    H["Authorization"] = f"Bearer {tok}"
+
+    code, body, ms = http_req('https://mobileapp.comic-walker.com/v2/screens/home', headers=H, timeout=15)
+    steps.append(f"首页 → HTTP {code} ({ms}ms)")
+    comic = None
+    if code == 200:
+        res = json_body(body).get('resources') or {}
+        for section in ('new_first_time_free_comics', 'attention_comics', 'pickup_comics'):
+            items = res.get(section) or []
+            if items and items[0].get('id'):
+                comic = items[0]
+                break
+    if not comic:
+        return result('ERROR', 'content', detail="首页无可用漫画", steps=steps)
+    cid = comic['id']
+
+    code, body, ms = http_req(f"https://mobileapp.comic-walker.com/v1/comics/{cid}/episodes?offset=0&limit=5&sort=asc",
+                              headers=H, timeout=12)
+    eps = json_body(body).get('resources') or [] if code == 200 else []
+    if not eps:
+        return result('ERROR', 'content', detail=f"拿不到章节 ({comic.get('title', '')[:14]})", steps=steps)
+    ep = eps[0]
+    steps.append(f"章节: {ep.get('title', '')[:14]}")
+
+    code, body, ms = http_req(f"https://mobileapp.comic-walker.com/v1/screens/comics/{cid}/episodes/{ep['id']}/viewer",
+                              headers=H, timeout=15)
+    mss = (json_body(body).get('resources') or {}).get('manuscripts') or [] if code == 200 else []
+    if not mss:
+        return result('RISK_CONTROL', 'content', code=code,
+                      detail="viewer 无可用页面（非免费章节或需租借点数）", steps=steps)
+    m = mss[0]
+    dh = m.get('drm_hash') or ''
+    if not dh.startswith('01') or len(dh) < 18:
+        return result('ERROR', 'content', detail=f"不支持的 drm_hash 版本: {dh[:8]}", steps=steps)
+    key = [int(dh[2 + i * 2:4 + i * 2], 16) for i in range(8)]
+
+    code, body, ms = http_req(m['drm_image_url'], headers=H, timeout=15)
+    kind = img_magic(bytes(b ^ key[i % 8] for i, b in enumerate(body)))
+    steps.append(f"下载+XOR 还原 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind} (XOR 解密)", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
+def e2e_ccc():
+    """CCC追漫台: 数据级。公开首页 API 正常即可验证服务可用。
+    章节接口需登录 token（密码+验证码）, 图片为 AES-CBC 加密存储 — 游客身份无法做内容级。"""
+    steps = []
+    h = {"User-Agent": UA_BROWSER, "device": "web_desktop", "uuid": "null", "Accept": "application/json"}
+    code, body, ms = http_req('https://api.creative-comic.tw/public/home_v2', headers=h, timeout=12)
+    steps.append(f"home_v2 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('DOWN' if code == 'ERR' else 'BLOCKED', 'data', code=code, steps=steps)
+    d = json_body(body)
+    data = (d or {}).get('data') or {}
+    n_books = str(data).count("'title'")
+    if not data:
+        return result('ERROR', 'data', detail="home_v2 无业务数据", steps=steps)
+    return result('OK_DATA', 'data', latency=ms, code=200,
+                  detail=f"公开 API 正常 (含 {n_books} 个作品条目); 章节需登录、图片 AES 加密, 内容级不可行", steps=steps)
+
+
+def e2e_manhuagui():
+    """漫画柜: 章节数据被 Dean Edwards packer + LZString(base64) 双重混淆, 纯 Python 解包。
+    链路: 首页→详情→章节页→解包(files/path/sl)→us.hamreus.com 图片下载。
+    站点对部分网络 403, 以实际响应诚实判定。"""
+    steps = []
+    base = "https://www.manhuagui.com"
+    h = {"User-Agent": UA_BROWSER, "Referer": base + "/"}
+    code, body, ms = http_req(base + '/', headers=h, timeout=15)
+    steps.append(f"首页 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', code=code, steps=steps)
+    m = re.search(rb'href="/comic/(\d+)/', body)
+    if not m:
+        return result('ERROR', 'content', detail="首页无漫画链接", steps=steps)
+    cid = m.group(1).decode()
+
+    code, body, ms = http_req(f"{base}/comic/{cid}/", headers=h, timeout=15)
+    steps.append(f"详情 comic={cid} → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, steps=steps)
+    m = re.search(rb'href="/comic/\d+/(\d+)\.html', body)
+    if not m:
+        return result('ERROR', 'content', detail="详情页无章节链接", steps=steps)
+    epid = m.group(1).decode()
+
+    code, body, ms = http_req(f"{base}/comic/{cid}/{epid}.html", headers=h, timeout=15)
+    steps.append(f"章节页 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, steps=steps)
+    script = body.decode('utf-8', 'ignore')
+    mm = re.search(r"\}\('(.+?)',\s*(\d+),\s*(\d+),\s*'(.+?)'\[\s*'\\x73\\x70\\x6c\\x69\\x63'\]\('\\x7c'\),0,\{\}\)",
+                   script, re.S) or re.search(r"\}\('(.+?)',\s*(\d+),\s*(\d+),\s*'(.+?)'\.split\('\|'\),0,\{\}\)",
+                                              script, re.S)
+    if not mm:
+        return result('ERROR', 'content', detail="找不到章节数据 packer 脚本", steps=steps)
+    try:
+        karr = lzstring_decompress_b64(mm.group(4)).split('|')
+        decoded = unpack_packer_tokens(mm.group(1), int(mm.group(2)), int(mm.group(3)), karr)
+        obj_start = decoded.index('{')
+        depth, end = 0, -1
+        for i, ch in enumerate(decoded[obj_start:], obj_start):
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        obj = json.loads(decoded[obj_start:end + 1])
+        files, path, sl = obj.get('files') or [], obj.get('path') or '', obj.get('sl') or {}
+    except Exception as e:
+        return result('ERROR', 'content', detail=f"章节数据解包失败: {e}", steps=steps)
+    if not files:
+        return result('ERROR', 'content', detail="解包后无图片文件列表", steps=steps)
+    img_url = f"https://us.hamreus.com{path}{files[0]}"
+    if sl.get('e') is not None:
+        img_url += f"?e={sl['e']}&m={sl['m']}"
+    steps.append(f"解包出 {len(files)} 张图")
+
+    code, body, ms = http_req(img_url, headers=h, timeout=15)
+    kind = img_magic(body)
+    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind} (LZString 解包)", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
 def e2e_picacg():
     """哔咔：HMAC 签名访问 init 接口（匿名）。能到数据级；取图需账号 → LOGIN_REQUIRED。"""
     steps = []
@@ -863,8 +1245,12 @@ CONTENT_PROBES = {
     'wnacg': e2e_wnacg,
     'zaimanhua': e2e_zaimanhua,
     'baozi': e2e_baozi,
+    'manhuaren': e2e_manhuaren,
+    'shonen_jump_plus': e2e_shonen_jump_plus,
+    'comic_walker': e2e_comic_walker,
+    'manhuagui': e2e_manhuagui,
 }
-DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm}
+DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm, 'ccc': e2e_ccc}
 
 
 def run_overseas():
