@@ -42,14 +42,21 @@ jobs:
           print(f"Validated {len(sources)} indexed source files before probing.")
           PY
 
-      - name: Run Hybrid Health Check
+      - name: Restore probe runtime state
+        uses: actions/cache@v4
+        with:
+          path: work/e2e_run/
+          key: probe-runtime-state-${{ github.run_id }}
+          restore-keys: probe-runtime-state-
+
+      - name: Run E2E Health Check
         id: run_probe
         env:
           PROBE_SSH_KEY: ${{ secrets.PROBE_SSH_KEY }}
           PROBE_HOST: ${{ secrets.PROBE_HOST }}
           PROBE_USER: ${{ secrets.PROBE_USER || 'probe-runner' }}
         run: |
-          python scripts/hybrid_health_check.py
+          python scripts/e2e_health_check.py --production
         continue-on-error: true
 
       - name: Send Alert Issue & Push Notification (if degraded)
@@ -57,11 +64,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -f "/tmp/has_alert.txt" ] && [ "$(cat /tmp/has_alert.txt)" = "true" ]; then
+          if [ -f "work/e2e_run/has_alert.txt" ] && [ "$(cat work/e2e_run/has_alert.txt)" = "true" ]; then
             echo "🚨 Triggering alert Issue to notify maintainer..."
             gh issue create \
               --title "[🚨 探活异常告警] 漫画源或测速引擎发生严重异常" \
-              --body-file "/tmp/health_check_alert.md" \
+              --body-file "work/e2e_run/health_check_alert.md" \
               --assignee "${{ github.repository_owner }}" \
               --label "bug" || true
           fi
@@ -80,6 +87,14 @@ jobs:
           else
             echo "✅ README.md latency data unchanged, skipping commit."
           fi
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-run-${{ github.run_id }}
+          path: work/e2e_run/
+          retention-days: 14
 
       - name: Propagate Final Status
         if: steps.run_probe.outcome != 'success'

@@ -35,6 +35,8 @@ import ssl
 import struct
 import sys
 import time
+import argparse
+from pathlib import Path
 import uuid
 import base64
 import hashlib
@@ -47,6 +49,8 @@ from datetime import datetime, timezone, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.environ.get('E2E_OUT_DIR') or os.path.join(ROOT, 'work', 'e2e_run')
+PRODUCTION = False
+WRITE_README = False
 
 UA_BROWSER = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
@@ -1322,6 +1326,63 @@ def build_readme_section(overseas, mainland, engine_name):
     return md
 
 
+def load_probe_state():
+    path = os.path.join(OUT_DIR, 'probe_state.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_probe_state(state):
+    path = os.path.join(OUT_DIR, 'probe_state.json')
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def update_alert_state(overseas, mainland, engine_failed):
+    state = load_probe_state()
+    alertable = set()
+    if engine_failed:
+        alertable.add('__mainland_engine__')
+    for key, value in overseas.items():
+        if value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
+            alertable.add(key)
+    should_alert = False
+    for key in set(state) | alertable:
+        item = state.get(key, {'consecutive_bad': 0, 'alerted': False})
+        if key in alertable:
+            item['consecutive_bad'] = int(item.get('consecutive_bad', 0)) + 1
+            if item['consecutive_bad'] >= 2 and not item.get('alerted', False):
+                should_alert = True
+                item['alerted'] = True
+            item['last_verdict'] = 'ENGINE_FAILED' if key == '__mainland_engine__' else overseas[key]['verdict']
+        else:
+            item['consecutive_bad'] = 0
+            item['alerted'] = False
+            item['last_verdict'] = 'OK'
+        state[key] = item
+    save_probe_state(state)
+    return should_alert
+
+
+def write_readme_section(readme_section):
+    path = os.path.join(ROOT, 'README.md')
+    text = Path(path).read_text(encoding='utf-8')
+    start = "## 🧭 各漫画源最佳线路与网络推荐指南 (Recommended Lines)"
+    end = "## 🛠️ 重点修复与更新日志 (Changelog)"
+    a, b = text.find(start), text.find(end)
+    if a < 0 or b < 0 or a >= b:
+        print('[WARN] README markers missing; real README was not modified')
+        return False
+    Path(path).write_text(text[:a] + readme_section.rstrip() + '\n\n' + text[b:], encoding='utf-8')
+    return True
+
+
 def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
     md = "# 🩺 VeneraX 漫画源端到端探活报告 (E2E)\n\n"
     md += f"- **测速时间**：{get_dual_time_str(True)}\n"
@@ -1360,6 +1421,13 @@ def build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad
 # ---------------------------------------------------------------- 主流程（模拟 GitHub workflow 步骤）
 
 def main():
+    global OUT_DIR, PRODUCTION, WRITE_README
+    parser = argparse.ArgumentParser(description='VeneraX E2E health probe')
+    parser.add_argument('--production', action='store_true', help='enable README update and persistent alert state')
+    parser.add_argument('--write-readme', action='store_true', help='write the generated section into README.md')
+    args = parser.parse_args()
+    PRODUCTION = args.production
+    WRITE_README = args.write_readme or PRODUCTION
     os.makedirs(OUT_DIR, exist_ok=True)
     started = time.time()
     print("=" * 66)
@@ -1380,7 +1448,7 @@ def main():
 
     # Step 4: 判定汇总 + 告警规则
     content_bad = [k for k, v in overseas.items()
-                   if v['tier'] == 'content' and v['verdict'] in ('DOWN', 'BLOCKED', 'RISK_CONTROL')]
+                   if v['verdict'] in ('DOWN', 'BLOCKED', 'ERROR')]
     conn_core_bad = []
     if mainland:
         for core_key in ('copy_manga', 'Komiic', 'baozi'):
@@ -1388,7 +1456,7 @@ def main():
                 conn_core_bad.append(core_key)
     engine_failed = mainland is None
 
-    has_alert = engine_failed or bool(content_bad) or bool(conn_core_bad)
+    has_alert = update_alert_state(overseas, mainland, engine_failed) if PRODUCTION else (engine_failed or bool(content_bad) or bool(conn_core_bad))
     alert_msg = None
     if has_alert:
         alert_msg = "内容级探测发现真实异常" if (content_bad or conn_core_bad) else "大陆双探活引擎失效"
@@ -1406,7 +1474,11 @@ def main():
     readme_section = build_readme_section(overseas, mainland, engine_name)
     with open(os.path.join(OUT_DIR, 'README_section_preview.md'), 'w', encoding='utf-8') as f:
         f.write(readme_section)
-    print(f"[Step 5] README 区块预览 → {OUT_DIR}/README_section_preview.md (真实 README 未改动)")
+    if WRITE_README:
+        if write_readme_section(readme_section):
+            print('[Step 5] README.md 已更新')
+    else:
+        print(f"[Step 5] README 区块预览 → {OUT_DIR}/README_section_preview.md (真实 README 未改动)")
 
     summary = build_step_summary(overseas, mainland, engine_name, alert_msg)
     with open(os.path.join(OUT_DIR, 'step_summary.md'), 'w', encoding='utf-8') as f:
