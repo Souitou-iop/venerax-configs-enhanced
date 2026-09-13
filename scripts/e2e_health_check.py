@@ -31,6 +31,7 @@ VeneraX E2E (Content-Level) Health Check — 端到端内容级探针（新一�
 import json
 import os
 import re
+import ssl
 import struct
 import sys
 import time
@@ -56,15 +57,17 @@ _spec.loader.exec_module(hhc)
 
 # ---------------------------------------------------------------- 基础工具
 
-def http_req(url, headers=None, data=None, method="GET", timeout=12, max_bytes=12 * 1024 * 1024):
-    """返回 (status, body_bytes, elapsed_ms)；网络异常时 status='ERR'。"""
+def http_req(url, headers=None, data=None, method="GET", timeout=12, max_bytes=12 * 1024 * 1024, insecure=False):
+    """返回 (status, body_bytes, elapsed_ms)；网络异常时 status='ERR'。
+    insecure=True 时跳过 TLS 证书校验（仅用于证书链损坏的自家图片 CDN，如包子 bzcdn.net）。"""
     h = {"User-Agent": UA_BROWSER}
     if headers:
         h.update(headers)
     req = urllib.request.Request(url, data=data, headers=h, method=method)
+    ctx = ssl._create_unverified_context() if insecure else None
     t0 = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             body = resp.read(max_bytes)
             return resp.status, body, int((time.time() - t0) * 1000)
     except urllib.error.HTTPError as e:
@@ -647,6 +650,118 @@ def e2e_wnacg():
     return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
 
 
+def e2e_zaimanhua():
+    """再漫画：官方 JSON API (v4api.zaimanhua.com)。
+    链路: 更新列表 → 详情(data.data.chapters 分组结构) → 章节图片(page_url_hd/page_url) → 下载图片字节。"""
+    steps = []
+    h = {"User-Agent": "Mozilla/5.0 (Linux; Android) Mobile"}
+    code, body, ms = http_req("https://v4api.zaimanhua.com/app/v1/comic/update/list/0/1",
+                              headers=h, timeout=12)
+    steps.append(f"更新列表 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', code=code, steps=steps)
+    cid = None
+    try:
+        item = json_body(body)["data"][0]
+        cid = item.get("comic_id") or item.get("id")
+    except Exception:
+        pass
+    if not cid:
+        return result('ERROR', 'content', detail="列表结构异常", steps=steps)
+
+    code, body, ms = http_req(f"https://v4api.zaimanhua.com/app/v1/comic/detail/{cid}?channel=android",
+                              headers=h, timeout=12)
+    steps.append(f"详情 comic={cid} → HTTP {code} ({ms}ms)")
+    ep = None
+    if code == 200:
+        d = json_body(body)
+        try:
+            groups = d["data"]["data"]["chapters"] or []
+            if groups and groups[0].get("data"):
+                ep = groups[0]["data"][0]["chapter_id"]
+        except Exception:
+            pass
+    if not ep:
+        return result('ERROR', 'content', detail="详情无章节（结构异常或该作无章节）", steps=steps)
+
+    code, body, ms = http_req(f"https://v4api.zaimanhua.com/app/v1/comic/chapter/{cid}/{ep}",
+                              headers=h, timeout=12)
+    steps.append(f"章节图片接口 → HTTP {code} ({ms}ms)")
+    img_url = None
+    if code == 200:
+        d = json_body(body)
+        try:
+            dd = d["data"]["data"]
+            imgs = dd.get("page_url_hd") or dd.get("page_url") or []
+            if imgs:
+                img_url = imgs[0]
+        except Exception:
+            pass
+    if not img_url:
+        return result('ERROR', 'content', detail="章节无图片 URL", steps=steps)
+
+    code, body, ms = http_req(img_url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.zaimanhua.com/"},
+                              timeout=15)
+    kind = img_magic(body)
+    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind}", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
+def e2e_baozi():
+    """包子漫画：HTML 链。章节 URL 按序号拼接 /comic/chapter/{id}/0_{n}.html（与 baozi.js loadEp 一致）。
+    图片 CDN (bzcdn.net) 证书链损坏，下载图片一步放宽证书校验（仅此一步，App 端同样不校验）。"""
+    steps = []
+    mirrors = ["https://www.baozimhcn.com", "https://www.bzmgcn.com",
+               "https://www.webmota.com", "https://www.twmanga.com"]
+    h = {"User-Agent": UA_BROWSER}
+    base = mirrors[0]
+    code, body, ms = http_req(base + "/", headers=h, timeout=15)
+    steps.append(f"首页 {base.split('//')[1]} → HTTP {code} ({ms}ms)")
+    if code != 200:
+        for m in mirrors[1:]:
+            code, body, ms = http_req(m + "/", headers=h, timeout=15)
+            steps.append(f"镜像 {m.split('//')[1]} → HTTP {code} ({ms}ms)")
+            if code == 200:
+                base = m
+                break
+        else:
+            return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', code=code, steps=steps)
+
+    m = re.search(rb'href="/comic/([a-zA-Z0-9_-]+)"', body)
+    if not m:
+        return result('ERROR', 'content', detail="首页无漫画链接", steps=steps)
+    cid = m.group(1).decode()
+
+    code, body, ms = http_req(f"{base}/comic/{cid}", headers={**h, "Referer": base + "/"}, timeout=15)
+    steps.append(f"详情 {cid[:20]}… → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, steps=steps)
+
+    img_url = None
+    for ep in ("0_1", "0_2", "1_1"):
+        code, body, ms = http_req(f"{base}/comic/chapter/{cid}/{ep}.html",
+                                  headers={**h, "Referer": base + "/"}, timeout=15)
+        steps.append(f"章节页 {ep} → HTTP {code} ({ms}ms)")
+        if code == 200:
+            m2 = re.search(rb'data-src="(https?://[^"]+/[a-z]comic/[^"]+)"', body)
+            if m2:
+                img_url = m2.group(1).decode()
+                break
+    if not img_url:
+        return result('ERROR', 'content', detail="章节页无图片链接", steps=steps)
+
+    code, body, ms = http_req(img_url, headers={**h, "Referer": base + "/"}, timeout=15, insecure=True)
+    kind = img_magic(body)
+    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+        return result('OK_CONTENT', 'content', latency=ms, code=200,
+                      detail=f"端到端成功: {len(body)} 字节 {kind}", steps=steps)
+    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+
+
 def e2e_picacg():
     """哔咔：HMAC 签名访问 init 接口（匿名）。能到数据级；取图需账号 → LOGIN_REQUIRED。"""
     steps = []
@@ -671,6 +786,14 @@ def e2e_picacg():
 # 探针目标换成 jm.js 真实使用的 /setting API 路径 (海外列与大陆 Globalping 列共用)。
 JM_DOMAINS = ['www.cdnhjk.net', 'www.cdngwc.cc', 'www.cdngwc.net', 'www.cdngwc.club', 'www.cdnutc.me']
 hhc.PROBES['jm']['url'] = f"https://{JM_DOMAINS[3]}/setting?app_img_shunt=0&express="
+
+# 爱看漫: 旧配置探测域名 ikamn.com 已是停放空壳域名 (Hostinger 停车页, 200 假绿),
+# 换 ikmmh.js 里的真实域名 www.ikmmh.com + 其移动端 UA 探测。
+hhc.PROBES['ikmmh']['url'] = 'https://www.ikmmh.com/'
+hhc.PROBES['ikmmh']['headers'] = {
+    'User-Agent': ('Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) '
+                   'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1 Edg/140.0.0.0'),
+}
 
 
 def jm_app_headers():
@@ -738,6 +861,8 @@ CONTENT_PROBES = {
     'ehentai': e2e_ehentai,
     'hitomi': e2e_hitomi,
     'wnacg': e2e_wnacg,
+    'zaimanhua': e2e_zaimanhua,
+    'baozi': e2e_baozi,
 }
 DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm}
 
