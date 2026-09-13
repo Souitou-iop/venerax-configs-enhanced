@@ -234,35 +234,46 @@ def e2e_copy_manga(out_dir):
         msg = (json_body(body) or {}).get('message', '')
         return result('RISK_CONTROL', 'content', code=210,
                       detail=f"列表正常但详情接口被风控拦截: {msg}", steps=steps)
-    group_path = "default"
+    # 分组字典在 results 顶层 (results.groups), 与 copy_manga.js 的 data.groups 一致
+    group_path, group_count = "default", None
     if code == 200:
         d = json_body(body)
         try:
-            groups = d["results"]["comic"].get("groups") or {}
+            groups = (d.get("results") or {}).get("groups") or {}
             if groups:
-                group_path = list(groups.values())[0]["path_word"]
+                first = list(groups.values())[0]
+                group_path = first["path_word"]
+                group_count = first.get("count")
         except Exception:
             pass
-    steps.append(f"分组 = {group_path}")
+    steps.append(f"分组 = {group_path}" + (f" (应含 {group_count} 话)" if group_count else ""))
 
     code, body, ms = http_req(
-        f"{base}/api/v3/comic/{path_word}/group/{group_path}/chapters?limit=1&offset=0&in_mainland=false",
+        f"{base}/api/v3/comic/{path_word}/group/{group_path}/chapters?limit=100&offset=0&in_mainland=false",
         headers=headers, timeout=10)
     steps.append(f"章节列表 → HTTP {code} ({ms}ms)")
     if code == 210:
         return result('RISK_CONTROL', 'content', code=210,
-                      detail="章节接口被 210 风控拦截（阅读路径不可用，而现行探针看列表 200 会亮绿灯）", steps=steps)
+                      detail="章节接口被 210 风控拦截（阅读路径不可用，而列表接口仍 200 —— 现行探针的盲区）", steps=steps)
     uuid_ = None
     if code == 200:
         d = json_body(body)
+        items = []
         try:
-            items = d["results"].get("list") or d["results"].get("chapters") or []
+            r = d.get("results") or {}
+            items = r.get("list") or r.get("chapters") or []
             if items:
                 uuid_ = items[0]["uuid"]
         except Exception:
             pass
+        if not uuid_:
+            # 200 但列表为空: 与 groups.count 矛盾, 是 210 软风控的另一种形态
+            hint = f"分组计数 {group_count} 话" if group_count else "分组非空"
+            return result('RISK_CONTROL', 'content', code=200,
+                          detail=f"章节接口返回空列表 ({hint}却 total=0) —— 软风控特征，列表接口仍 200", steps=steps)
     if not uuid_:
-        return result('ERROR', 'content', detail="拿不到章节 uuid，阅读链路中断", steps=steps)
+        return result('ERROR', 'content', code=code,
+                      detail=f"章节接口异常响应 (HTTP {code})", steps=steps)
 
     code, body, ms = http_req(f"{base}/api/v3/comic/{path_word}/chapter2/{uuid_}?in_mainland=false",
                               headers=headers, timeout=10)
@@ -373,43 +384,36 @@ def e2e_komiic():
 
 
 def e2e_mangadex():
-    """MangaDex：列表 → 章节-feed → at-home 图片服务器 → 下载图片字节。"""
+    """MangaDex：列表 → 章节-feed → at-home 图片服务器 → 下载图片字节。
+    feed 不限翻译语言（探针只关心有无真实页面），依次尝试前 3 本漫画防止单本无章节。"""
     steps = []
     ua = {"User-Agent": "VeneraX-e2e-health-check/1.0"}
-    code, body, ms = http_req("https://api.mangadex.org/manga?limit=1&hasAvailableChapters=true",
+    code, body, ms = http_req("https://api.mangadex.org/manga?limit=3&hasAvailableChapters=true",
                               headers=ua, timeout=12)
     steps.append(f"漫画列表 → HTTP {code} ({ms}ms)")
     if code != 200:
         return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', code=code, steps=steps)
     try:
-        manga_id = json_body(body)["data"][0]["id"]
+        manga_ids = [m["id"] for m in json_body(body)["data"][:3]]
     except Exception:
         return result('ERROR', 'content', detail="列表结构异常", steps=steps)
 
-    code, body, ms = http_req(
-        f"https://api.mangadex.org/manga/{manga_id}/feed?limit=1&translatedLanguage[]=en&order[chapter]=desc",
-        headers=ua, timeout=12)
-    steps.append(f"章节列表 → HTTP {code} ({ms}ms)")
     chapter_id = None
-    if code == 200:
-        d = json_body(body)
-        try:
-            if d["data"]:
-                chapter_id = d["data"][0]["id"]
-        except Exception:
-            pass
+    for manga_id in manga_ids:
+        code, body, ms = http_req(
+            f"https://api.mangadex.org/manga/{manga_id}/feed?limit=1&order[chapter]=desc",
+            headers=ua, timeout=12)
+        steps.append(f"章节列表 ({manga_id[:8]}…) → HTTP {code} ({ms}ms)")
+        if code == 200:
+            d = json_body(body)
+            try:
+                if d["data"]:
+                    chapter_id = d["data"][0]["id"]
+                    break
+            except Exception:
+                pass
     if not chapter_id:
-        steps.append("该漫画无英文章节, 换一篇再试")
-        code, body, ms = http_req("https://api.mangadex.org/manga?limit=1&hasAvailableChapters=true&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica",
-                                  headers=ua, timeout=12)
-        try:
-            manga_id = json_body(body)["data"][0]["id"]
-            code, body, ms = http_req(
-                f"https://api.mangadex.org/manga/{manga_id}/feed?limit=1&translatedLanguage[]=en&order[chapter]=desc",
-                headers=ua, timeout=12)
-            chapter_id = json_body(body)["data"][0]["id"]
-        except Exception:
-            return result('ERROR', 'content', detail="拿不到章节", steps=steps)
+        return result('ERROR', 'content', detail="前 3 本漫画均拿不到章节", steps=steps)
 
     code, body, ms = http_req(f"https://api.mangadex.org/at-home/server/{chapter_id}", headers=ua, timeout=12)
     steps.append(f"图片服务器分配 → HTTP {code} ({ms}ms)")
@@ -749,8 +753,9 @@ def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
     for key, p in hhc.PROBES.items():
         ov = overseas.get(key) or result('NOT_IMPLEMENTED', 'none')
         cn = mainland.get(key, {'latency': -1, 'code': 'ERR'}) if mainland else {'latency': -1, 'code': 'ERR'}
+        ov_code = ov['code'] if ov['code'] is not None else '-'
         md += (f"| **{p['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | "
-               f"`{ov['code']}` ({ov['latency_ms']}ms) | `{cn['code']}` ({cn['latency']}ms) |\n")
+               f"`{ov_code}` ({ov['latency_ms']}ms) | `{cn['code']}` ({cn['latency']}ms) |\n")
     return md
 
 
