@@ -43,7 +43,7 @@ jobs:
           PY
 
       - name: Restore probe runtime state
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: work/e2e_run/
           key: probe-runtime-state-${{ github.run_id }}
@@ -87,6 +87,15 @@ jobs:
           else
             echo "✅ README.md latency data unchanged, skipping commit."
           fi
+
+      - name: Save probe runtime state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            work/e2e_run/copy_device.json
+            work/e2e_run/probe_state.json
+          key: probe-runtime-state-${{ github.run_id }}
 
       - name: Upload probe artifacts
         if: always()

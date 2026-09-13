@@ -1344,14 +1344,16 @@ def save_probe_state(state):
     os.replace(tmp, path)
 
 
-def update_alert_state(overseas, mainland, engine_failed):
+def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
     state = load_probe_state()
     alertable = set()
     if engine_failed:
         alertable.add('__mainland_engine__')
     for key, value in overseas.items():
-        if value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
+        # 已知受限源仅在 README 展示，避免把运行环境限制当作站点故障告警。
+        if key not in {'ikmmh', 'ManHuaGui'} and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
             alertable.add(key)
+    alertable.update(f'core:{key}' for key in conn_core_bad)
     should_alert = False
     for key in set(state) | alertable:
         item = state.get(key, {'consecutive_bad': 0, 'alerted': False})
@@ -1360,7 +1362,12 @@ def update_alert_state(overseas, mainland, engine_failed):
             if item['consecutive_bad'] >= 2 and not item.get('alerted', False):
                 should_alert = True
                 item['alerted'] = True
-            item['last_verdict'] = 'ENGINE_FAILED' if key == '__mainland_engine__' else overseas[key]['verdict']
+            if key == '__mainland_engine__':
+                item['last_verdict'] = 'ENGINE_FAILED'
+            elif key.startswith('core:'):
+                item['last_verdict'] = 'CORE_SOURCE_DOWN'
+            else:
+                item['last_verdict'] = overseas[key]['verdict']
         else:
             item['consecutive_bad'] = 0
             item['alerted'] = False
@@ -1432,6 +1439,10 @@ def main():
     PRODUCTION = args.production
     WRITE_README = args.write_readme or PRODUCTION
     os.makedirs(OUT_DIR, exist_ok=True)
+    for filename in ('has_alert.txt', 'health_check_alert.md'):
+        path = os.path.join(OUT_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
     started = time.time()
     print("=" * 66)
     print("VeneraX E2E Health Check — 本地完整流程演练 (模拟 GitHub Actions)")
@@ -1459,7 +1470,7 @@ def main():
                 conn_core_bad.append(core_key)
     engine_failed = mainland is None
 
-    has_alert = update_alert_state(overseas, mainland, engine_failed) if PRODUCTION else (engine_failed or bool(content_bad) or bool(conn_core_bad))
+    has_alert = update_alert_state(overseas, mainland, engine_failed, conn_core_bad) if PRODUCTION else (engine_failed or bool(content_bad) or bool(conn_core_bad))
     alert_msg = None
     if has_alert:
         alert_msg = "内容级探测发现真实异常" if (content_bad or conn_core_bad) else "大陆双探活引擎失效"

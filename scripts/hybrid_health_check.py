@@ -322,7 +322,7 @@ def probe_mainland_fallback_globalping():
             "type": "http",
             "measurementOptions": {
                 "request": {
-                    "method": "GET",
+                    "method": p.get("method", "GET"),
                     "path": path_part,
                     "headers": {"User-Agent": "Mozilla/5.0"}
                 },
