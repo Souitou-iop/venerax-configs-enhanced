@@ -1248,7 +1248,7 @@ CONTENT_PROBES = {
     'manhuaren': e2e_manhuaren,
     'shonen_jump_plus': e2e_shonen_jump_plus,
     'comic_walker': e2e_comic_walker,
-    'manhuagui': e2e_manhuagui,
+    'ManHuaGui': e2e_manhuagui,
 }
 DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm, 'ccc': e2e_ccc}
 
