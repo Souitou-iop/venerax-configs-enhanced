@@ -7,6 +7,10 @@ on:
     - cron: '15 0,12 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: comic-health-check
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write
@@ -45,7 +49,9 @@ jobs:
       - name: Restore probe runtime state
         uses: actions/cache/restore@v4
         with:
-          path: work/e2e_run/
+          path: |
+            work/e2e_run/copy_device.json
+            work/e2e_run/probe_state.json
           key: probe-runtime-state-${{ github.run_id }}
           restore-keys: probe-runtime-state-
 
