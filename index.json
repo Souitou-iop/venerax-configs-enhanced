@@ -19,7 +19,7 @@
     "name": "MangaDex",
     "fileName": "manga_dex.js",
     "key": "manga_dex",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "description": "国际多语言日漫主力源：官方 API、中文/日文语言筛选与章节聚合",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manga_dex.js"
   },
@@ -35,8 +35,9 @@
     "name": "包子漫画",
     "fileName": "baozi.js",
     "key": "baozi",
-    "version": "1.1.7",
-    "description": "连载国漫/汉化秒更免登录：修复章节正文图片解析，扩充活跃CDN节点"
+    "version": "1.1.9",
+    "description": "连载国漫/汉化秒更免登录：修复章节正文图片解析，扩充活跃CDN节点",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/baozi.js"
   },
   {
     "name": "漫画人",
@@ -77,8 +78,9 @@
     "name": "E-Hentai",
     "fileName": "ehentai.js",
     "key": "ehentai",
-    "version": "1.2.3",
-    "description": "国际顶级同人画廊：修复非标准 DOM 空列表崩溃与 taglist 解析，注入防封请求头"
+    "version": "1.2.4",
+    "description": "国际顶级同人画廊：修复非标准 DOM 空列表崩溃与 taglist 解析，注入防封请求头",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/ehentai.js"
   },
   {
     "name": "nhentai",
@@ -105,8 +107,9 @@
     "name": "少年ジャンプ＋",
     "fileName": "shonen_jump_plus.js",
     "key": "shonen_jump_plus",
-    "version": "1.1.3",
-    "description": "集英社官方少年Jump+连载生肉漫画：iTunes 动态版本同步与详情/章节并发加速"
+    "version": "1.1.4",
+    "description": "集英社官方少年Jump+连载生肉漫画：iTunes 动态版本同步与详情/章节并发加速",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/shonen_jump_plus.js"
   },
   {
     "name": "カドコミ",

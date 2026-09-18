@@ -1,11 +1,21 @@
 class Baozi extends ComicSource {
+  // 统一请求头 (防封: 模拟真实浏览器, Referer 跟随域名设置)
+  get webHeaders() {
+    return {
+      "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+      "Referer": this.baseUrl + "/",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    };
+  }
+
   // 此漫画源的名称
   name = "包子漫画";
 
   // 唯一标识符
   key = "baozi";
 
-  version = "1.1.7";
+  version = "1.1.9";
 
   minAppVersion = "1.0.0";
 
@@ -33,7 +43,7 @@ class Baozi extends ComicSource {
         { value: "twmanga.com" },
         { value: "dinnerku.com" },
       ],
-      default: "baozimhcn.com",
+      default: "bzmgcn.com",
     },
     cdn_domains: {
       title: "图片资源站域名",
@@ -44,8 +54,6 @@ class Baozi extends ComicSource {
         { value: "asgb-a3.bzcdn.net" },
         { value: "as.baozimh.com" },
         { value: "s1.baozicdn.com" },
-        { value: "s1.bzcdn.net" },
-        { value: "s2.bzcdn.net" },
         { value: "", text: "默认" },
       ],
       default: "",
@@ -160,7 +168,7 @@ class Baozi extends ComicSource {
       type: "singlePageWithMultiPart",
 
       load: async () => {
-        var res = await Network.get(this.baseUrl);
+        var res = await Network.get(this.baseUrl, this.webHeaders);
         if (res.status !== 200) {
           throw "Invalid status code: " + res.status;
         }
@@ -268,9 +276,7 @@ class Baozi extends ComicSource {
   /// 分类漫画页面, 即点击分类标签后进入的页面
   categoryComics = {
     load: async (category, param, options, page) => {
-      let res = await Network.get(
-        `${this.baseUrl}/api/bzmhq/amp_comic_list?type=${param}&region=${options[0]}&state=${options[1]}&filter=%2a&page=${page}&limit=36&language=${this.lang}&__amp_source_origin=${this.baseUrl}`
-      );
+      let res = await Network.get(`${this.baseUrl}/api/bzmhq/amp_comic_list?type=${param}&region=${options[0]}&state=${options[1]}&filter=%2a&page=${page}&limit=36&language=${this.lang}&__amp_source_origin=${this.baseUrl}`, this.webHeaders);
       if (res.status !== 200) {
         throw "Invalid status code: " + res.status;
       }
@@ -298,7 +304,7 @@ class Baozi extends ComicSource {
   /// 搜索
   search = {
     load: async (keyword, options, page) => {
-      let res = await Network.get(`${this.baseUrl}/search?q=${keyword}`);
+      let res = await Network.get(`${this.baseUrl}/search?q=${encodeURIComponent(keyword)}`, this.webHeaders);
       if (res.status !== 200) {
         throw "Invalid status code: " + res.status;
       }
@@ -324,7 +330,8 @@ class Baozi extends ComicSource {
     addOrDelFavorite: async (comicId, folderId, isAdding) => {
       if (!isAdding) {
         let res = await Network.post(
-          `${this.baseUrl}/user/operation_v2?op=del_bookmark&comic_id=${comicId}`
+          `${this.baseUrl}/user/operation_v2?op=del_bookmark&comic_id=${comicId}`,
+          this.webHeaders
         );
         if (!res.status || res.status >= 400) {
           throw "Invalid status code: " + res.status;
@@ -332,7 +339,8 @@ class Baozi extends ComicSource {
         return "ok";
       } else {
         let res = await Network.post(
-          `${this.baseUrl}/user/operation_v2?op=set_bookmark&comic_id=${comicId}&chapter_slot=0`
+          `${this.baseUrl}/user/operation_v2?op=set_bookmark&comic_id=${comicId}&chapter_slot=0`,
+          this.webHeaders
         );
         if (!res.status || res.status >= 400) {
           throw "Invalid status code: " + res.status;
@@ -345,7 +353,7 @@ class Baozi extends ComicSource {
     loadFolders: null,
     /// 加载漫画
     loadComics: async (page, folder) => {
-      let res = await Network.get(`${this.baseUrl}/user/my_bookshelf`);
+      let res = await Network.get(`${this.baseUrl}/user/my_bookshelf`, this.webHeaders);
       if (res.status !== 200) {
         throw "Invalid status code: " + res.status;
       }
@@ -384,7 +392,7 @@ class Baozi extends ComicSource {
   comic = {
     // 加载漫画信息
     loadInfo: async (id) => {
-      let res = await Network.get(`${this.baseUrl}/comic/${id}`);
+      let res = await Network.get(`${this.baseUrl}/comic/${id}`, this.webHeaders);
       if (res.status !== 200) {
         throw "Invalid status code: " + res.status;
       }
@@ -489,31 +497,30 @@ class Baozi extends ComicSource {
     loadEp: async (comicId, epId) => {
       const images = [];
 
-      let currentPageUrl = `${this.baseUrl}/comic/chapter/${comicId}/0_${epId}.html`;
+      // www 主域名可访问; appcn 子域被 Cloudflare 指纹拦截返回 403
+      const chapterHost = "https://www.baozimh.com";
+      let currentPageUrl = `${chapterHost}/comic/chapter/${comicId}/0_${epId}.html`;
 
-      const res = await Network.get(currentPageUrl, {
-        Referer: `${this.baseUrl}/`,
-      });
+      const res = await Network.get(currentPageUrl, this.webHeaders);
       if (res.status !== 200) {
         throw `Invalid status code: ${res.status}`;
       }
 
       const doc = new HtmlDocument(res.body);
 
-      let imageNodes = doc.querySelectorAll(".comic-contain amp-img.comic-contain__item");
-      if (!imageNodes.length) {
-        imageNodes = doc.querySelectorAll(".comic-contain > .chapter-img");
-      }
+      // www 版页面图片节点: <amp-img class="comic-contain__item" data-src=...>
+      const imageNodes = doc.querySelectorAll(".comic-contain__item");
       imageNodes.forEach((imgNode) => {
-        let imgUrl =
-          imgNode.attributes?.["data-src"] ||
-          imgNode.attributes?.src ||
-          imgNode.querySelector(".comic-contain__item")?.attributes?.["data-src"];
+        let imgUrl = imgNode.attributes?.["data-src"];
+        if (!imgUrl) {
+          const img = imgNode.querySelector("img");
+          if (img) imgUrl = img.attributes?.["src"];
+        }
         if (imgUrl) {
           const match = imgUrl.match(/^(https?:\/\/)?([^/\s:]+)(:\d+)?(\/[a-z]comic\/.*)/);
           if (match) {
             const domain = this.loadSetting("cdn_domains") === "" ? match[2] : this.loadSetting("cdn_domains");
-            imgUrl = `${match[1] || "https://"}${domain}${this.loadSetting("image_quality")}${match[4]}`;
+            imgUrl = `${match[1]}${domain}${this.loadSetting("image_quality")}${match[4]}`;
           }
           images.push(imgUrl);
         }

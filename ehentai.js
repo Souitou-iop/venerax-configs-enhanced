@@ -17,7 +17,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.2.3"
+    version = "1.2.4"
 
     minAppVersion = "1.5.3"
 
@@ -223,6 +223,16 @@ class Ehentai extends ComicSource {
         Network.deleteCookies('https://exhentai.org')
         Network.setCookies('https://exhentai.org', cookies)
         throw `You may not have permission to access this page. Please check your network or try to login again.`
+    }
+
+    /**
+     * 未登录时 favorites.php / addfav 弹窗返回登录表单, 抛 Login expired 让 App 自动重登后重试
+     * @param body {string} - response body
+     */
+    assertLogged(body) {
+        if (typeof body === "string" && body.includes("act=Login&CODE=01")) {
+            throw "Login expired"
+        }
     }
 
     /**
@@ -448,13 +458,70 @@ class Ehentai extends ComicSource {
     category = {
         /// title of the category page, used to identify the page, it should be unique
         title: "ehentai",
-        parts: [],
+        parts: [
+            {
+                name: "Category",
+                type: "fixed",
+                // 与原站首页搜索栏 10 分类对应; param 为"只看该类"的 f_cats 排除掩码 (1023 - (1 << index))
+                categories: ["Misc", "Doujinshi", "Manga", "Artist CG", "Game CG", "Image Set", "Cosplay", "Asian Porn", "Non-H", "Western"],
+                itemType: "category",
+                categoryParams: ["1022", "1021", "1019", "1015", "1007", "991", "959", "895", "767", "511"],
+            },
+            {
+                name: "Language",
+                type: "fixed",
+                // 走 categoryComics.load, param 作为 f_search 关键字精确搜索
+                categories: ["Chinese", "English", "Japanese"],
+                itemType: "category",
+                categoryParams: ["language:chinese", "language:english", "language:japanese"],
+            },
+        ],
         // enable ranking page
         enableRankingPage: true,
     }
 
     /// category comic loading related
     categoryComics = {
+        /**
+         * 原站列表翻页是 next/prev token 制 (/?next=...), 不支持 ?page=N,
+         * 这里按顺序加载维护 next 链缓存 (key=category|param)。
+         * @param category {string}
+         * @param param {string?} - 纯数字为 f_cats 掩码, 否则为搜索关键字
+         * @param options {string[]} - options from optionList (本站分类无排序参数)
+         * @param page {number}
+         */
+        load: async (category, param, options, page) => {
+            page = page || 1;
+            if (!this._catNextCache) {
+                this._catNextCache = {};
+            }
+            let cacheKey = `${category}|${param}`;
+            let url;
+            if (page === 1 || !this._catNextCache[cacheKey]) {
+                if (/^\d+$/.test(param || "")) {
+                    url = `${this.baseUrl}/?f_cats=${param}`;
+                } else if (param) {
+                    url = `${this.baseUrl}/?f_search=${encodeURIComponent(param)}`;
+                } else {
+                    url = this.baseUrl;
+                }
+                this._catNextCache[cacheKey] = {};
+            } else {
+                url = this._catNextCache[cacheKey][page];
+                if (!url) {
+                    return { comics: [], maxPage: page };
+                }
+            }
+            let res = await this.getGalleries(url, false);
+            if (res.next) {
+                this._catNextCache[cacheKey][page + 1] = res.next;
+            }
+            return {
+                comics: res.comics,
+                // 原站不返回总数; 空页即停 (下一页无 next 时 comics 为空)
+                maxPage: res.next ? page + 1 : page,
+            };
+        },
         ranking: {
             // For a single option, use `-` to separate the value and text, left for value, right for text
             options: [
@@ -498,6 +565,8 @@ class Ehentai extends ComicSource {
             let category = (options && options[0]) ? JSON.parse(options[0]) : [];
             let stars = options[1];
             let language = options[2];
+            let expunged = options[3];
+            let torrentOnly = options[4];
             let fcats = 1023
             if (!Array.isArray(category)) {
                 category = [category];
@@ -514,6 +583,12 @@ class Ehentai extends ComicSource {
             }
             if(stars) {
                 url += `&f_srdd=${stars}`
+            }
+            if(expunged) {
+                url += `&f_sh=1`
+            }
+            if(torrentOnly) {
+                url += `&f_sto=1`
             }
             return this.getGalleries(next ?? url, false);
         },
@@ -547,11 +622,9 @@ class Ehentai extends ComicSource {
                 // For multi-select, there are multiple selected values or none. The `load` function will receive a json string which is an array of selected values
                 // For dropdown, there is one selected value at most. If no selected value, the `load` function will receive a null
                 type: "dropdown",
-                // For a single option, use `-` to separate the value and text, left for value, right for text
+                // 原站 f_srdd 仅支持 0(Any)/2/3/4/5, 无 1 (见 ehg_index.c.js 高级搜索)
                 options: [
                     "-<none>",
-                    "0-0",
-                    "1-1",
                     "2-2",
                     "3-3",
                     "4-4",
@@ -563,7 +636,6 @@ class Ehentai extends ComicSource {
             {
                 // type: select, multi-select, dropdown
                 type: "dropdown",
-                // For a single option, use `-` to separate the value and text, left for value, right for text
                 options: [
                     "-<none>",
                     "chinese-Chinese",
@@ -572,6 +644,24 @@ class Ehentai extends ComicSource {
                 ],
                 // option label
                 label: "Language",
+            },
+            {
+                type: "dropdown",
+                // 原站高级搜索 f_sh: Browse Expunged Galleries
+                options: [
+                    "-No",
+                    "1-Yes",
+                ],
+                label: "Expunged",
+            },
+            {
+                type: "dropdown",
+                // 原站高级搜索 f_sto: Require Gallery Torrent
+                options: [
+                    "-No",
+                    "1-Yes",
+                ],
+                label: "Torrents",
             },
         ],
 
@@ -638,6 +728,7 @@ class Ehentai extends ComicSource {
             if (res.status !== 200) {
                 throw `Invalid status code: ${res.status}`
             }
+            this.assertLogged(res.body);
             let document = new HtmlDocument(res.body);
             let folders = new Map();
             folders.set("-1", "All")
@@ -770,6 +861,33 @@ class Ehentai extends ComicSource {
             if (uploader) {
                 tags.set("uploader", [uploader]);
             }
+
+            // Parent 画廊 (旧版/被顶替版本), gdd 表 Parent 行链接
+            let parentLink = null;
+            for (let a of document.querySelectorAll("div#gdd a")) {
+                let href = a.attributes["href"] || "";
+                if (href.includes("/g/")) {
+                    parentLink = href;
+                    break;
+                }
+            }
+            if (parentLink) {
+                let pm = RegExp("/g/(\\d+)/").exec(parentLink);
+                tags.set("Parent", [pm ? pm[1] : parentLink]);
+            }
+
+            // 文件大小 / 被收藏次数拼成简介 (原站 gdd 表)
+            let descParts = [];
+            for (let td of document.querySelectorAll("div#gdd td.gdt2")) {
+                if (/\b(KiB|MiB|GiB|TiB)\b/.test(td.text)) {
+                    descParts.push(td.text.trim());
+                    break;
+                }
+            }
+            let favCount = document.getElementById("favcount")?.text?.trim();
+            if (favCount) {
+                descParts.push(`Favorited ${favCount}`);
+            }
             
             let time = document.querySelector("div#gdd > table > tr > td.gdt2, div#gdd > table > tbody > tr > td.gdt2").text
 
@@ -799,6 +917,7 @@ class Ehentai extends ComicSource {
                // uploader: uploader,
                 uploadTime: time,
                 url: id,
+                description: descParts.join(" | ") || undefined,
                 comments: comments.comments,
             })
 
@@ -810,7 +929,7 @@ class Ehentai extends ComicSource {
             comic.folder = folder
             comic.token = variables.get("token")
             this.apikey = variables.get("apikey")
-            if(this.apikey[0] === '"') {
+            if (typeof this.apikey === "string" && this.apikey[0] === '"') {
                 this.apikey = this.apikey.substring(1, this.apikey.length - 1)
             }
             this.uid = variables.get("apiuid")
@@ -1382,11 +1501,20 @@ class Ehentai extends ComicSource {
         onClickTag: (namespace, tag) => {
             if (namespace == "Category") {
                 const categories = ["misc", "doujinshi", "manga", "artist cg", "game cg", "image set", "cosplay", "asian porn", "non-h", "western"];
+                let index = categories.indexOf(tag.toLowerCase());
+                if (index < 0) {
+                    return { action: 'search', keyword: tag, param: null };
+                }
+                // f_cats 是"排除掩码": 只看该类 = 排除其余 9 类
+                let others = [];
+                for (let i = 0; i < categories.length; i++) {
+                    if (i !== index) others.push(i.toString());
+                }
                 return {
                     page: "search",
                     attributes: {
                         'keyword': "",
-                        'options': [categories.indexOf(tag.toLowerCase()).toString(), "", ""]
+                        'options': [JSON.stringify(others), "", ""]
                     }
                 };
             }
@@ -1501,6 +1629,10 @@ class Ehentai extends ComicSource {
             "Category": "分类",
             "Min Stars": "最少星星",
             "Language": "语言",
+            "Expunged": "已删除画廊",
+            "Torrents": "仅有种子",
+            "No": "否",
+            "Yes": "是",
             "H@H Original": "H@H 原版",
             "H@H 800x": "H@H 800x",
             "H@H 1280x": "H@H 1280x", 
@@ -1538,6 +1670,10 @@ class Ehentai extends ComicSource {
             "Category": "分類",
             "Min Stars": "最少星星",
             "Language": "語言",
+            "Expunged": "已刪除畫廊",
+            "Torrents": "僅有種子",
+            "No": "否",
+            "Yes": "是",
             "H@H Original": "H@H 原版",
             "H@H 800x": "H@H 800x",
             "H@H 1280x": "H@H 1280x",

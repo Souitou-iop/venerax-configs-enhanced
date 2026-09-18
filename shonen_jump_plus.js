@@ -1,16 +1,16 @@
 class ShonenJumpPlus extends ComicSource {
   name = "少年ジャンプ＋";
   key = "shonen_jump_plus";
-  version = "1.1.3";
+  version = "1.1.4";
   minAppVersion = "1.2.1";
   url =
-    "https://cdn.jsdelivr.net/gh/senran-N/venera-configs@main/shonen_jump_plus.js";
+    "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/shonen_jump_plus.js";
 
   deviceId = this.generateDeviceId();
   bearerToken = null;
   userAccountId = null;
   tokenExpiry = 0;
-  latestVersion = "4.0.38";
+  latestVersion = "4.0.40";
 
   get headers() {
     return {
@@ -62,58 +62,106 @@ class ShonenJumpPlus extends ComicSource {
           throw "Cannot fetch home sections";
         }
 
+        // 排行板块标题本地化 (サーバー返回日文标题)
+        const rankTitles = {
+          "総合": "综合排行",
+          "注目": "注目排行",
+          "読切": "短篇排行",
+          "完結": "完结排行",
+          "シェア": "分享排行",
+        };
+
         const sections = response.data.homeSections;
-        const dailyRankingSection = sections.find((section) =>
-          section.__typename === "DailyRankingSection"
-        );
-
-        if (!dailyRankingSection || !dailyRankingSection.dailyRankings) {
-          throw "Cannot fetch daily ranking data";
-        }
-
-        const dailyRanking = dailyRankingSection.dailyRankings.find((ranking) =>
-          ranking.ranking && ranking.ranking.__typename === "DailyRanking"
-        );
-
-        if (
-          !dailyRanking || !dailyRanking.ranking ||
-          !dailyRanking.ranking.items || !dailyRanking.ranking.items.edges
-        ) {
-          throw "Cannot fetch ranking data structure";
-        }
-
-        const rankingItems = dailyRanking.ranking.items.edges.map((edge) =>
-          edge.node
-        ).filter((node) =>
-          node.__typename === "DailyRankingValidItem" && node.product
-        );
-
-        function parseComic(item) {
-          const series = item.product.series;
-          if (!series) return null;
-
+        const result = {};
+        const addPart = (title, comics) => {
+          if (title && comics && comics.length > 0) result[title] = comics;
+        };
+        const parseSeries = (series) => {
+          if (!series || !series.databaseId) return null;
           const cover = series.squareThumbnailUriTemplate ||
             series.horizontalThumbnailUriTemplate;
-
           return {
             id: series.databaseId,
             title: series.title || "",
-            cover: cover
-              ? cover.replace("{height}", "500").replace("{width}", "500")
-              : "",
+            subTitle: series.author?.name || "",
+            cover: this.replaceCoverUrl(cover),
             tags: [],
-            description: `Ranking: ${item.rank} · Views: ${
-              item.viewCount || "Unknown"
-            }`,
+            description: series.author?.name || "",
           };
+        };
+
+        // 1. 每日排行: dailyRankings 含最近7天, 取日期最新的一天
+        //    (原实现取 find() 第一个, 实际是一周前的旧榜)
+        const dailySection = sections.find((section) =>
+          section.__typename === "DailyRankingSection"
+        );
+        const dayRankings = (dailySection?.dailyRankings || [])
+          .map((entry) => entry?.ranking)
+          .filter((ranking) =>
+            ranking && ranking.__typename === "DailyRanking" &&
+            ranking.items?.edges?.length > 0
+          );
+        if (dayRankings.length > 0) {
+          dayRankings.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+          const latest = dayRankings[dayRankings.length - 1];
+          // date 为 UTC ISO, +9h 转 JST 取 月/日
+          const jst = new Date(new Date(latest.date).getTime() + 9 * 3600000);
+          const dateLabel = `${jst.getUTCMonth() + 1}/${jst.getUTCDate()}`;
+          const comics = latest.items.edges
+            .map((edge) => edge.node)
+            .filter((node) =>
+              node.__typename === "DailyRankingValidItem" && node.product?.series
+            )
+            .map((node) => {
+              const comic = parseSeries(node.product.series);
+              if (comic) {
+                const views = node.viewCount != null
+                  ? ` · ${node.viewCount} views`
+                  : "";
+                comic.description = `#${node.rank}${views}`;
+              }
+              return comic;
+            })
+            .filter((comic) => comic !== null);
+          addPart(`每日排行(${dateLabel})`, comics);
         }
 
-        const comics = rankingItems.map(parseComic).filter((comic) =>
-          comic !== null
+        // 2. 系列排行: 総合/注目/読切/完結/シェア (各30件)
+        //    ルーキー(RookieSeriesRanking) 指向外部 rookie.shonenjump.com, 无法在本源内打开, 跳过
+        const rankingSection = sections.find((section) =>
+          section.__typename === "RankingSection"
         );
+        for (const entry of rankingSection?.rankings || []) {
+          if (entry.ranking?.__typename !== "SeriesRanking") continue;
+          const comics = (entry.ranking.series?.edges || [])
+            .map((edge) => parseSeries(edge.node))
+            .filter((comic) => comic !== null);
+          addPart(
+            rankTitles[entry.title] || entry.title,
+            comics,
+          );
+        }
 
-        const result = {};
-        result["Daily Ranking"] = comics;
+        // 3. 动态作品板块 (新連載はこちら / 最新の読切はこちら / アニメ化作品！等)
+        for (const section of sections) {
+          if (section.__typename !== "WorksSection") continue;
+          const comics = (section.seriesList || [])
+            .map((node) => parseSeries(node))
+            .filter((comic) => comic !== null);
+          addPart(section.title, comics);
+        }
+
+        // 4. 限时免费作品
+        const freeSection = sections.find((section) =>
+          section.__typename === "FreeOnlyNowSection"
+        );
+        if (freeSection) {
+          const comics = (freeSection.seriesList || [])
+            .map((node) => parseSeries(node?.series))
+            .filter((comic) => comic !== null);
+          addPart(freeSection.title || "限时免费", comics);
+        }
+
         return result;
       },
     },
@@ -121,47 +169,43 @@ class ShonenJumpPlus extends ComicSource {
 
   search = {
     load: async (keyword, _, page) => {
-      if (!this.bearerToken || Date.now() > this.tokenExpiry) {
-        await this.fetchBearerToken();
-      }
+      await this.ensureAuth();
 
-      const operationName = "SearchResult";
+      // 接口为游标分页(after), app 侧为页码分页; 缓存每个关键词的游标供下一页使用
+      if (!page || page <= 1) page = 1;
+      this._searchCursors = this._searchCursors || {};
+      if (page === 1) delete this._searchCursors[keyword];
+      const after = this._searchCursors[keyword] || null;
 
-      const response = await this.graphqlRequest(operationName, {
+      const response = await this.graphqlRequest("SearchResult", {
         keyword,
+        after,
       });
       const edges = response?.data?.search?.edges || [];
       const pageInfo = response?.data?.search?.pageInfo || {};
 
+      // 查询限定 types: [SERIES] (MagazineLabel 杂志条目无法在本源打开)
       const comics = edges.map(({ node }) => {
+        if (node.__typename !== "Series") return null;
         const authors = (node.author?.name || "").split(/\s*\/\s*/).filter(
           Boolean,
         );
-        const cover = node.latestIssue?.thumbnailUriTemplate ||
-          node.thumbnailUriTemplate;
-        if (node.__typename === "Series") {
-          return new Comic({
-            id: node.databaseId,
-            title: node.title || "",
-            cover: this.replaceCoverUrl(cover),
-            description: node.description || "",
-            tags: authors,
-          });
-        }
-        if (node.__typename === "MagazineLabel") {
-          return new Comic({
-            id: node.databaseId,
-            title: node.title || "",
-            cover: this.replaceCoverUrl(cover),
-          });
-        }
-        return null;
+        return new Comic({
+          id: node.databaseId,
+          title: node.title || "",
+          cover: this.replaceCoverUrl(node.thumbnailUriTemplate),
+          description: node.description || "",
+          tags: authors,
+        });
       }).filter(Boolean);
+
+      if (pageInfo.hasNextPage && pageInfo.endCursor) {
+        this._searchCursors[keyword] = pageInfo.endCursor;
+      }
 
       return {
         comics,
-        maxPage: pageInfo.hasNextPage ? (page || 1) + 1 : (page || 1),
-        endCursor: pageInfo.endCursor,
+        maxPage: pageInfo.hasNextPage ? page + 1 : page,
       };
     },
   };
@@ -197,15 +241,28 @@ class ShonenJumpPlus extends ComicSource {
         Boolean,
       );
 
+      const statusMap = {
+        "ONGOING": "连载中",
+        "FINISHED": "已完结",
+        "HIATUS": "休载中",
+        "SUSPENDED": "休载中",
+      };
+      const tags = {
+        "Author": authors,
+        "Update": [updateDate.toISOString().slice(0, 10)],
+      };
+      const status = seriesData.serialInfo?.status;
+      if (status) tags["Status"] = [statusMap[status] || status];
+      if (seriesData.serialUpdateScheduleLabel) {
+        tags["Schedule"] = [seriesData.serialUpdateScheduleLabel];
+      }
+
       return new ComicDetails({
         title: seriesData.title || "",
         subtitle: authors.join(" / "),
         cover: this.replaceCoverUrl(seriesData.thumbnailUriTemplate),
         description: seriesData.description || "",
-        tags: {
-          "Author": authors,
-          "Update": [updateDate.toISOString().slice(0, 10)],
-        },
+        tags,
         url: `https://shonenjumpplus.com/app/episode/${seriesData.publisherId}`,
         chapters,
       });
@@ -393,13 +450,12 @@ class ShonenJumpPlus extends ComicSource {
 
 const GraphQLQueries = {
   "SearchResult": `query SearchResult($after: String, $keyword: String!) {
-        search(after: $after, first: 50, keyword: $keyword, types: [SERIES,MAGAZINE_LABEL]) {
+        search(after: $after, first: 50, keyword: $keyword, types: [SERIES]) {
             pageInfo { hasNextPage endCursor }
             edges {
                 node {
                     __typename
                     ... on Series { id databaseId title thumbnailUriTemplate author { name } description }
-                    ... on MagazineLabel { id databaseId title thumbnailUriTemplate latestIssue { thumbnailUriTemplate } }
                 }
             }
         }
@@ -410,6 +466,7 @@ const GraphQLQueries = {
             author { name }
             description
             hashtags serialUpdateScheduleLabel
+            serialInfo { status isTrial }
             openAt
             publisherId
         }
@@ -448,10 +505,35 @@ const GraphQLQueries = {
     homeSections {
       __typename
       ...DailyRankingSection
+      ... on RankingSection {
+        title
+        rankings {
+          title
+          ranking {
+            __typename
+            ... on SeriesRanking {
+              series(first: 30) {
+                edges { node { __typename ...ExploreSeries } }
+              }
+            }
+          }
+        }
+      }
+      ... on WorksSection {
+        title
+        seriesList { __typename ...ExploreSeries }
+      }
+      ... on FreeOnlyNowSection {
+        title
+        seriesList { __typename series { __typename ...ExploreSeries } }
+      }
     }
   }
-  fragment DesignSectionImage on DesignSectionImage {
-    imageUrl width height
+  fragment ExploreSeries on Series {
+    id databaseId title
+    author { name }
+    horizontalThumbnailUriTemplate: subThumbnailUri(type: HORIZONTAL_WITH_LOGO)
+    squareThumbnailUriTemplate: subThumbnailUri(type: SQUARE_WITHOUT_LOGO)
   }
   fragment SerialInfoIcon on SerialInfo {
     isOriginal isIndies
@@ -504,9 +586,6 @@ const GraphQLQueries = {
   }
   fragment DailyRankingSection on DailyRankingSection {
     title
-    titleImage {
-      __typename ...DesignSectionImage
-    }
     dailyRankings {
       ranking {
         __typename ...DailyRanking
