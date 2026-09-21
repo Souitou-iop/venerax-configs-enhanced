@@ -138,7 +138,7 @@
     "fileName": "rumanhua.js",
     "key": "rumanhua",
     "version": "1.0.0",
-    "description": "中文漫画源：更新/分类与百合标签，章节 AES 解密；站点搜索接口当前返回空",
+    "description": "中文漫画源：更新/分类入口与章节 AES 解密；站点搜索接口当前返回空",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rumanhua.js"
   }
 ]

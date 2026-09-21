@@ -187,7 +187,7 @@ PROBES = {
         'headers': {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.rumanhua.org/'},
         'data': None,
         'line_opts': '如漫画主站 / 图片 CDN',
-        'advice': '• 公开内容免登录；站点搜索接口当前不稳定，探针使用百合标签分类入口。'
+        'advice': '• 公开内容免登录；站点搜索接口当前不稳定，探针使用分类入口。'
     },
     'ccc': {
         'name': 'CCC追漫台',

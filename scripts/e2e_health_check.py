@@ -783,7 +783,7 @@ def e2e_html_aes_source(name, search_url, base_url, detail_pattern, chapter_patt
     steps = []
     h = search_headers or {"User-Agent": UA_BROWSER, "Referer": base_url + "/"}
     code, body, ms = http_req(search_url, headers=h, timeout=15)
-    steps.append(f"百合入口 → HTTP {code} ({ms}ms)")
+    steps.append(f"入口 → HTTP {code} ({ms}ms)")
     if code != 200:
         return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', latency=ms, code=code, detail="入口请求失败", steps=steps)
     body_text = body.decode("utf-8", "ignore") if isinstance(body, (bytes, bytearray)) else body
