@@ -43,6 +43,7 @@ import hashlib
 import hmac as hmac_mod
 import importlib.util
 import random
+import subprocess
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -761,6 +762,92 @@ def e2e_wnacg():
     return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
 
 
+def decrypt_html_params(params):
+    """Decrypt the AES-128-CBC params used by 51漫画/如漫画 using openssl."""
+    raw = base64.b64decode(params)
+    if len(raw) <= 16 or len(raw[16:]) % 16:
+        raise ValueError("invalid encrypted params")
+    key = b"9S8$vJnU2ANeSRoF"
+    proc = subprocess.run(
+        ["openssl", "enc", "-d", "-aes-128-cbc", "-K", key.hex(), "-iv", raw[:16].hex()],
+        input=raw[16:], capture_output=True, timeout=8, check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError(proc.stderr.decode("utf-8", "ignore")[:160] or "openssl decrypt failed")
+    return json.loads(proc.stdout.decode("utf-8"))
+
+
+def e2e_html_aes_source(name, search_url, base_url, detail_pattern, chapter_pattern,
+                       image_prefix="", search_headers=None):
+    """Shared content probe for the two verified AES-backed HTML sources."""
+    steps = []
+    h = search_headers or {"User-Agent": UA_BROWSER, "Referer": base_url + "/"}
+    code, body, ms = http_req(search_url, headers=h, timeout=15)
+    steps.append(f"百合入口 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('DOWN' if code == 'ERR' else 'BLOCKED', 'content', latency=ms, code=code, detail="入口请求失败", steps=steps)
+    body_text = body.decode("utf-8", "ignore") if isinstance(body, (bytes, bytearray)) else body
+    dm = re.search(detail_pattern, body_text, re.I)
+    if not dm:
+        return result('ERROR', 'content', code=code, detail="未解析到漫画详情链接", steps=steps)
+    detail_url = dm.group(0) if dm.group(0).startswith("http") else base_url + dm.group(0)
+    code, detail, ms = http_req(detail_url, headers=h, timeout=15)
+    steps.append(f"详情 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, detail="详情请求失败", steps=steps)
+    detail_text = detail.decode("utf-8", "ignore") if isinstance(detail, (bytes, bytearray)) else detail
+    cm = re.search(chapter_pattern, detail_text, re.I)
+    if not cm:
+        return result('ERROR', 'content', code=code, detail="未解析到章节链接", steps=steps)
+    chapter_url = cm.group(0) if cm.group(0).startswith("http") else base_url + cm.group(0)
+    code, chapter, ms = http_req(chapter_url, headers=h, timeout=15)
+    steps.append(f"章节页 → HTTP {code} ({ms}ms)")
+    if code != 200:
+        return result('ERROR', 'content', code=code, detail="章节请求失败", steps=steps)
+    chapter_text = chapter.decode("utf-8", "ignore") if isinstance(chapter, (bytes, bytearray)) else chapter
+    pm = re.search(r"params\s*=\s*'([^']+)'", chapter_text)
+    if not pm:
+        return result('ERROR', 'content', code=code, detail="未找到加密 params", steps=steps)
+    try:
+        data = decrypt_html_params(pm.group(1))
+        images = data.get('images') or []
+    except Exception as exc:
+        return result('ERROR', 'content', code=code, detail=f"章节解密失败: {exc}", steps=steps)
+    if not images:
+        return result('ERROR', 'content', code=code, detail="章节图片列表为空", steps=steps)
+    last_code, last_kind, last_ms = None, None, -1
+    for raw_image_url in images[:5]:
+        image_url = raw_image_url
+        if not re.match(r"^https?://", image_url):
+            image_url = image_prefix + image_url
+        code, image, ms = http_req(image_url, headers={"User-Agent": UA_BROWSER, "Referer": chapter_url}, timeout=15)
+        kind = img_magic(image)
+        last_code, last_kind, last_ms = code, kind, ms
+        steps.append(f"下载图片 → HTTP {code}, {len(image)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+        if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+            return result('OK_CONTENT', 'content', latency=ms, code=200,
+                          detail=f"端到端成功: {len(image)} 字节 {kind}", steps=steps)
+    return result('ERROR', 'content', latency=last_ms, code=last_code,
+                  detail=f"图片链路失败 ({last_kind or last_code})", steps=steps)
+
+
+def e2e_manga51():
+    return e2e_html_aes_source(
+        '51漫画', 'https://m.51manga.com/search?key=%E7%99%BE%E5%90%88',
+        'https://m.51manga.com', r'/mh/[A-Za-z0-9]+', r'/show/[A-Za-z0-9]+\.html',
+        image_prefix='https://img1.baipiaoguai.org',
+        search_headers={"User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"},
+    )
+
+
+def e2e_rumanhua():
+    return e2e_html_aes_source(
+        '如漫画', 'https://www.rumanhua.org/category/tags/2654',
+        'https://www.rumanhua.org', r'/news/[0-9]+', r'/show/[A-Za-z0-9]+\.html',
+        search_headers={"User-Agent": UA_BROWSER, "Referer": "https://www.rumanhua.org/"},
+    )
+
+
 def e2e_zaimanhua():
     """再漫画：官方 JSON API (v4api.zaimanhua.com)。
     链路: 更新列表 → 详情(data.data.chapters 分组结构) → 章节图片(page_url_hd/page_url) → 下载图片字节。"""
@@ -1262,6 +1349,8 @@ CONTENT_PROBES = {
     'shonen_jump_plus': e2e_shonen_jump_plus,
     'comic_walker': e2e_comic_walker,
     'ManHuaGui': e2e_manhuagui,
+    'manga51': e2e_manga51,
+    'rumanhua': e2e_rumanhua,
 }
 DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm, 'ccc': e2e_ccc}
 

@@ -124,5 +124,21 @@
     "key": "ccc",
     "version": "1.0.3",
     "description": "台湾官方CCC创作集正版漫画：修复分类与搜索 options 空指针，关键词 URI 安全编码"
+  },
+  {
+    "name": "51漫画",
+    "fileName": "manga51.js",
+    "key": "manga51",
+    "version": "1.1.0",
+    "description": "中文漫画综合源：搜索、地区/题材/进度分类，章节 AES 解密与 WebP 图片",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manga51.js"
+  },
+  {
+    "name": "如漫画",
+    "fileName": "rumanhua.js",
+    "key": "rumanhua",
+    "version": "1.0.0",
+    "description": "中文漫画源：更新/分类与百合标签，章节 AES 解密；站点搜索接口当前返回空",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rumanhua.js"
   }
 ]

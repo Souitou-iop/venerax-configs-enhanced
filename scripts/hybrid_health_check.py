@@ -171,6 +171,24 @@ PROBES = {
         'line_opts': '角川官方 API',
         'advice': '• 角川官方移动端 API 国内直连偶有延迟；推荐海外代理环境获得秒开体验。'
     },
+    'manga51': {
+        'name': '51漫画',
+        'url': 'https://m.51manga.com/search?key=%E7%99%BE%E5%90%88',
+        'method': 'GET',
+        'headers': {'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36'},
+        'data': None,
+        'line_opts': '51漫画主站 / 图片 CDN',
+        'advice': '• 公开内容免登录；支持搜索、分类与章节图片读取。'
+    },
+    'rumanhua': {
+        'name': '如漫画',
+        'url': 'https://www.rumanhua.org/category/tags/2654',
+        'method': 'GET',
+        'headers': {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.rumanhua.org/'},
+        'data': None,
+        'line_opts': '如漫画主站 / 图片 CDN',
+        'advice': '• 公开内容免登录；站点搜索接口当前不稳定，探针使用百合标签分类入口。'
+    },
     'ccc': {
         'name': 'CCC追漫台',
         'url': 'https://api.creative-comic.tw/public/home_v2',
