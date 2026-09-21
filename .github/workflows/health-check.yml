@@ -3,7 +3,8 @@ name: Scheduled Comic Sources Health Check & Latency Benchmark
 on:
   schedule:
     
-    # Runs twice daily: 08:15 and 20:15 (Beijing Time / UTC+8)
+    # Target: 08:15 and 20:15 Beijing Time (UTC 00:15 and 12:15).
+    # GitHub may delay scheduled runs under platform load; actual start time is recorded in artifacts/README.
     - cron: '15 0,12 * * *'
   workflow_dispatch:
 

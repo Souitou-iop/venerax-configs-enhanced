@@ -3,7 +3,8 @@ name: Community Sources Tracker
 on:
   schedule:
     
-    # Runs every 2 days at 08:45 (Beijing Time / UTC+8)
+    # Target: every 2 days at 08:45 Beijing Time (UTC 00:45).
+    # GitHub may delay scheduled runs under platform load; actual start time is recorded in the Issue.
     - cron: '45 0 */2 * *'
   workflow_dispatch:
 
