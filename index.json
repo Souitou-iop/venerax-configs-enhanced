@@ -64,7 +64,7 @@
     "name": "禁漫天堂",
     "fileName": "jm.js",
     "key": "jm",
-    "version": "1.4.2",
+    "version": "1.4.3",
     "description": "18comic核心站：支持官方5条线路自动故障转移、12h域名缓存与打乱算法对齐"
   },
   {
@@ -86,21 +86,21 @@
     "name": "nhentai",
     "fileName": "nhentai.js",
     "key": "nhentai",
-    "version": "1.1.3",
+    "version": "2.0.0",
     "description": "热门单本同人志：适配官方 v2 嵌套 JSON 结构，单本画廊切章注入与60s防限频缓存"
   },
   {
     "name": "hitomi.la",
     "fileName": "hitomi.js",
     "key": "hitomi",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "description": "高清图库：集成 galleryblock/nozomi LRU 缓存与 B-tree 搜索去重加速"
   },
   {
     "name": "紳士漫畫",
     "fileName": "wnacg.js",
     "key": "wnacg",
-    "version": "1.0.11",
+    "version": "2.0.0",
     "description": "紳士漫畫：修复移动端UA选择器崩溃，支持标题作者/社团提取与4重搜索排序"
   },
   {

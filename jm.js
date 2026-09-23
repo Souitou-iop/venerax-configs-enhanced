@@ -7,7 +7,7 @@ class JM extends ComicSource {
     // unique id of the source
     key = "jm"
 
-    version = "1.4.2"
+    version = "1.4.3"
 
     minAppVersion = "1.5.0"
 
@@ -16,7 +16,7 @@ class JM extends ComicSource {
     static jmPkgName = "com.example.app"
 
     // update url
-    url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/jm.js"
+    url = "https://cdn.jsdelivr.net/gh/senran-N/venera-configs@main/jm.js"
 
     dailyCheckInInProgress = false
 
@@ -29,12 +29,12 @@ class JM extends ComicSource {
 
     // Current api domains (init'ed from fallback, refreshed from the official domain list).
     // Must be declared here so baseUrl works even before refreshApiDomains completes.
+    // Matches the official Server list (www.cdnutc.me is dead and no longer official).
     static apiDomains = [
         "www.cdnhjk.net",
         "www.cdngwc.cc",
         "www.cdngwc.net",
         "www.cdngwc.club",
-        "www.cdnutc.me",
     ];
 
     // Refresh the domain list at most every 12h on startup (failover covers the rest).
