@@ -8,7 +8,7 @@ class MangaDex extends ComicSource {
     // unique id of the source
     key = "manga_dex"
 
-    version = "1.2.0"
+    version = "1.2.1"
 
     minAppVersion = "1.6.0"
 
@@ -531,8 +531,13 @@ class MangaDex extends ComicSource {
             let chapters = new Map()
             let offset = 0
             let latest = null
+            let preferredLanguage = this.loadSetting("chapterLanguage") || this.settings.chapterLanguage.default
+            let languageOption = this.settings.chapterLanguage.options.find((option) => option.value === preferredLanguage)
+            let languageFilter = languageOption && preferredLanguage !== "all"
+                ? `&translatedLanguage[]=${encodeURIComponent(preferredLanguage)}`
+                : ""
             while (true) {
-                let url = `https://api.mangadex.org/manga/${id}/feed?limit=500&offset=${offset}&order[chapter]=asc&order[updatedAt]=asc`
+                let url = `https://api.mangadex.org/manga/${id}/feed?limit=500&offset=${offset}&order[chapter]=asc&order[updatedAt]=asc${languageFilter}`
                 let res = await fetch(url)
                 if (!res.ok) {
                     throw new Error("Network response was not ok")
@@ -939,6 +944,26 @@ class MangaDex extends ComicSource {
     }
 
     settings = {
+        chapterLanguage: {
+            title: "Chapter Language Preference",
+            type: "select",
+            options: [
+                { value: "all", text: "All languages" },
+                { value: "zh", text: "Chinese (Simplified)" },
+                { value: "zh-hk", text: "Chinese (Hong Kong)" },
+                { value: "zh-tw", text: "Chinese (Traditional)" },
+                { value: "zh-ro", text: "Chinese (Romanized)" },
+                { value: "en", text: "English" },
+                { value: "ja", text: "Japanese" },
+                { value: "ko", text: "Korean" },
+                { value: "fr", text: "French" },
+                { value: "de", text: "German" },
+                { value: "es", text: "Spanish" },
+                { value: "pt-br", text: "Portuguese (Brazil)" },
+                { value: "ru", text: "Russian" },
+            ],
+            default: "all",
+        },
         image_quality: {
             title: "Image Quality",
             type: "select",
@@ -958,8 +983,38 @@ class MangaDex extends ComicSource {
 
     // [Optional] translations for the strings in this config
     translation = {
-        'zh_CN': {},
-        'zh_TW': {},
+        'zh_CN': {
+            'Chapter Language Preference': '章节语言偏好',
+            'All languages': '全部语言',
+            'Chinese (Simplified)': '简体中文',
+            'Chinese (Hong Kong)': '香港繁体中文',
+            'Chinese (Traditional)': '繁体中文',
+            'Chinese (Romanized)': '中文罗马字',
+            'English': '英语',
+            'Japanese': '日语',
+            'Korean': '韩语',
+            'French': '法语',
+            'German': '德语',
+            'Spanish': '西班牙语',
+            'Portuguese (Brazil)': '葡萄牙语（巴西）',
+            'Russian': '俄语',
+        },
+        'zh_TW': {
+            'Chapter Language Preference': '章節語言偏好',
+            'All languages': '全部語言',
+            'Chinese (Simplified)': '簡體中文',
+            'Chinese (Hong Kong)': '香港繁體中文',
+            'Chinese (Traditional)': '繁體中文',
+            'Chinese (Romanized)': '中文羅馬字',
+            'English': '英語',
+            'Japanese': '日語',
+            'Korean': '韓語',
+            'French': '法語',
+            'German': '德語',
+            'Spanish': '西班牙語',
+            'Portuguese (Brazil)': '葡萄牙語（巴西）',
+            'Russian': '俄語',
+        },
         'en': {}
     }
 

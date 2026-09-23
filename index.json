@@ -19,7 +19,7 @@
     "name": "MangaDex",
     "fileName": "manga_dex.js",
     "key": "manga_dex",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "description": "国际多语言日漫主力源：官方 API、中文/日文语言筛选与章节聚合",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manga_dex.js"
   },
