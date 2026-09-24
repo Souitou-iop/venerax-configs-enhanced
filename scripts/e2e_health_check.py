@@ -1094,24 +1094,40 @@ def e2e_shonen_jump_plus():
 
 def e2e_comic_walker():
     """カドコミ: 匿名设备注册 → 首页免费专区取漫画 → 章节 → viewer manuscripts → XOR(drm_hash) 还原图片。
-    搜索接口已废弃(恒空), 漫画发现走 v2/screens/home 的首次免费专区。"""
+    搜索接口已废弃(恒空), 漫画发现走 v2/screens/home 的免费专区, 清空时兜底新着/推荐专区。"""
     steps = []
+
+    def req(url, **kw):
+        # 该域名偶发在传输层直接掐断连接, 与业务响应区分: 仅对 ERR 重试一次, HTTP 状态码视为权威判定
+        for _ in range(2):
+            c, b, m = http_req(url, **kw)
+            if c != 'ERR':
+                return c, b, m
+        return c, b, m
+
+    # 服务端校验最低 App 版本，1.6.x 会被 400/upgrade_required 拒绝
     H = {"X-API-Environment-Key": "ytBrdQ2ZYdRQguqEusVLxQVUgakNnVht",
-         "User-Agent": "BookWalkerApp/1.6.3 (Android 13)", "Content-Type": "application/json"}
-    code, body, ms = http_req('https://mobileapp.comic-walker.com/v1/users',
-                              headers=H, data=b'', method='POST', timeout=12)
+         "User-Agent": "BookWalkerApp/1.7.0 (Android 13)", "Content-Type": "application/json"}
+    code, body, ms = req('https://mobileapp.comic-walker.com/v1/users',
+                         headers=H, data=b'', method='POST', timeout=12)
     steps.append(f"匿名设备注册 → HTTP {code} ({ms}ms)")
     tok = json_body(body).get('resources', {}).get('access_token') if code == 200 else None
     if not tok:
-        return result('DOWN' if code == 'ERR' else 'ERROR', 'content', code=code, steps=steps)
+        j = json_body(body)
+        tag = (j.get('code') or (j.get('message') or '')[:40]) if isinstance(j, dict) else ''
+        why = '网络异常' if code == 'ERR' else f"HTTP {code}" + (f" ({tag})" if tag else '')
+        return result('DOWN' if code == 'ERR' else 'ERROR', 'content', code=code,
+                      detail=f"设备注册失败: {why}", steps=steps)
     H["Authorization"] = f"Bearer {tok}"
 
-    code, body, ms = http_req('https://mobileapp.comic-walker.com/v2/screens/home', headers=H, timeout=15)
+    code, body, ms = req('https://mobileapp.comic-walker.com/v2/screens/home', headers=H, timeout=15)
     steps.append(f"首页 → HTTP {code} ({ms}ms)")
     comic = None
     if code == 200:
         res = json_body(body).get('resources') or {}
-        for section in ('new_first_time_free_comics', 'attention_comics', 'pickup_comics'):
+        # 免费专区常在部分时段整体清空，清空时兜底新着/推荐专区（第1话通常可免费试读）
+        for section in ('new_first_time_free_comics', 'attention_comics', 'pickup_comics',
+                        'new_arrival_comics', 'recommendation_comics'):
             items = res.get(section) or []
             if items and items[0].get('id'):
                 comic = items[0]
@@ -1120,27 +1136,30 @@ def e2e_comic_walker():
         return result('ERROR', 'content', detail="首页无可用漫画", steps=steps)
     cid = comic['id']
 
-    code, body, ms = http_req(f"https://mobileapp.comic-walker.com/v1/comics/{cid}/episodes?offset=0&limit=5&sort=asc",
-                              headers=H, timeout=12)
+    code, body, ms = req(f"https://mobileapp.comic-walker.com/v1/comics/{cid}/episodes?offset=0&limit=5&sort=asc",
+                         headers=H, timeout=12)
     eps = json_body(body).get('resources') or [] if code == 200 else []
     if not eps:
         return result('ERROR', 'content', detail=f"拿不到章节 ({comic.get('title', '')[:14]})", steps=steps)
-    ep = eps[0]
-    steps.append(f"章节: {ep.get('title', '')[:14]}")
-
-    code, body, ms = http_req(f"https://mobileapp.comic-walker.com/v1/screens/comics/{cid}/episodes/{ep['id']}/viewer",
-                              headers=H, timeout=15)
-    mss = (json_body(body).get('resources') or {}).get('manuscripts') or [] if code == 200 else []
+    mss = None
+    for cand in eps[:3]:
+        code, body, ms = req(
+            f"https://mobileapp.comic-walker.com/v1/screens/comics/{cid}/episodes/{cand['id']}/viewer",
+            headers=H, timeout=15)
+        mss = (json_body(body).get('resources') or {}).get('manuscripts') or [] if code == 200 else []
+        steps.append(f"viewer({cand.get('title', '')[:12]}) → {len(mss)} 页 ({ms}ms)")
+        if mss:
+            break
     if not mss:
         return result('RISK_CONTROL', 'content', code=code,
-                      detail="viewer 无可用页面（非免费章节或需租借点数）", steps=steps)
+                      detail="前3话 viewer 均无可用页面（非免费章节或需租借点数）", steps=steps)
     m = mss[0]
     dh = m.get('drm_hash') or ''
     if not dh.startswith('01') or len(dh) < 18:
         return result('ERROR', 'content', detail=f"不支持的 drm_hash 版本: {dh[:8]}", steps=steps)
     key = [int(dh[2 + i * 2:4 + i * 2], 16) for i in range(8)]
 
-    code, body, ms = http_req(m['drm_image_url'], headers=H, timeout=15)
+    code, body, ms = req(m['drm_image_url'], headers=H, timeout=15)
     kind = img_magic(bytes(b ^ key[i % 8] for i, b in enumerate(body)))
     steps.append(f"下载+XOR 还原 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
     if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
