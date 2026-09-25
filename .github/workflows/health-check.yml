@@ -20,6 +20,9 @@ jobs:
   health-check:
     name: Dual-Engine Latency Probe & Auto Update
     runs-on: ubuntu-latest
+    # Hard stop well before the 360min default; every in-script request is bounded (10-15s),
+    # a healthy full run stays far below this even with retries.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout Repository
@@ -70,14 +73,42 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          PROBE_OUTCOME: ${{ steps.run_probe.outcome }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           if [ -f "work/e2e_run/has_alert.txt" ] && [ "$(cat work/e2e_run/has_alert.txt)" = "true" ]; then
             echo "🚨 Triggering alert Issue to notify maintainer..."
             gh issue create \
-              --title "[🚨 探活异常告警] 漫画源或测速引擎发生严重异常" \
+              --title "$(cat work/e2e_run/alert_title.txt 2>/dev/null || echo '[🚨 探活异常告警] 漫画源或测速引擎发生严重异常')" \
               --body-file "work/e2e_run/health_check_alert.md" \
               --assignee "${{ github.repository_owner }}" \
               --label "bug" || true
+          elif [ "$JOB_STATUS" != "cancelled" ] && [ "$PROBE_OUTCOME" != "cancelled" ] && [ "$PROBE_OUTCOME" != "success" ] && [ ! -f "work/e2e_run/results.json" ]; then
+            # The probe died before writing results.json (script bug / broken env / failed earlier
+            # step). Source-level alerts are denoised by the state machine, but a crash must not
+            # stay silent. results.json exists => the run completed by design (e.g. engine down,
+            # first occurrence) and the state machine deliberately holds the alert.
+            echo "🚨 Probe exited before producing results.json; filing fallback Issue..."
+            OPEN_CRASH=$(gh issue list --state open --label "bug" --limit 100 \
+              --json title --jq '[.[] | select(.title | contains("探针进程崩溃"))] | length' 2>/dev/null || echo 1)
+            if [ "$OPEN_CRASH" = "0" ]; then
+              {
+                echo "## 🚨 e2e 探针进程异常退出"
+                echo ""
+                echo "- **运行记录**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+                echo "- **现象**: 探针进程在写出 results.json 之前异常退出，说明脚本未跑完——大概率是脚本 bug、Python 环境或流程改动引入，而非漫画源本身故障。"
+                echo "- **影响**: 本轮 README 未更新，源级告警状态机未推进。"
+                echo ""
+                echo "请查看该次运行日志定位崩溃点，修复后可关闭本 Issue。同一时刻只保留一条未关闭的崩溃告警，不会重复刷屏。"
+              } > /tmp/probe_crash_alert.md
+              gh issue create \
+                --title "[🚨 探活异常告警] 探针进程崩溃，本轮探测未完成" \
+                --body-file /tmp/probe_crash_alert.md \
+                --assignee "${{ github.repository_owner }}" \
+                --label "bug" || true
+            else
+              echo "ℹ️ 已存在未关闭的探针崩溃 Issue，跳过重复创建。"
+            fi
           fi
 
       - name: Commit and Push README Updates
@@ -90,6 +121,9 @@ jobs:
             echo "📝 README.md updated with latest benchmark data, committing..."
             git add README.md
             git commit -m "docs: 自动同步最新双网络环境实测延迟数据 [skip ci]"
+            # Rebase onto remote in case it moved during the run window; normally a no-op
+            # since this job is the only writer to this region of history.
+            git pull --rebase origin main
             git push origin main
           else
             echo "✅ README.md latency data unchanged, skipping commit."

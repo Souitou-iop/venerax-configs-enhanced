@@ -1553,7 +1553,7 @@ def main():
     PRODUCTION = args.production
     WRITE_README = args.write_readme or PRODUCTION
     os.makedirs(OUT_DIR, exist_ok=True)
-    for filename in ('has_alert.txt', 'health_check_alert.md'):
+    for filename in ('has_alert.txt', 'health_check_alert.md', 'alert_title.txt'):
         path = os.path.join(OUT_DIR, filename)
         if os.path.exists(path):
             os.remove(path)
@@ -1591,6 +1591,17 @@ def main():
         alert_body = build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad)
         with open(os.path.join(OUT_DIR, 'health_check_alert.md'), 'w', encoding='utf-8') as f:
             f.write(alert_body)
+        # Issue 标题带上受影响源名，多条告警在 Issue 列表里才能互相区分（正文/告警文件由 workflow 读取）。
+        bad_names = [hhc.PROBES[k]['name'] for k in dict.fromkeys(content_bad + conn_core_bad) if k in hhc.PROBES]
+        if bad_names:
+            shown = '、'.join(bad_names[:3])
+            if len(bad_names) > 3:
+                shown += f" 等{len(bad_names)}源"
+            alert_title = f"[🚨 探活异常告警] {alert_msg}: {shown}"
+        else:
+            alert_title = f"[🚨 探活异常告警] {alert_msg}"
+        with open(os.path.join(OUT_DIR, 'alert_title.txt'), 'w', encoding='utf-8') as f:
+            f.write(alert_title)
         print(f"\n🚨 告警成立: {alert_msg} → {OUT_DIR}/health_check_alert.md")
 
     # Step 5: 产物输出（全部写入 work/e2e_run/, 不触碰真实 README.md）
@@ -1602,13 +1613,20 @@ def main():
     readme_section = build_readme_section(overseas, mainland, engine_name)
     with open(os.path.join(OUT_DIR, 'README_section_preview.md'), 'w', encoding='utf-8') as f:
         f.write(readme_section)
+    readme_warn = None
     if WRITE_README:
         if write_readme_section(readme_section):
             print('[Step 5] README.md 已更新')
+        else:
+            readme_warn = ("README 起止标记缺失或错位，本轮推荐指南区块未替换；"
+                           "探针结果本身正常，请检查 README 两个区块标题是否被人工改动")
     else:
         print(f"[Step 5] README 区块预览 → {OUT_DIR}/README_section_preview.md (真实 README 未改动)")
 
     summary = build_step_summary(overseas, mainland, engine_name, alert_msg)
+    if readme_warn:
+        # 标记丢失若只走日志会被淹没，必须进 step summary 才能在每次运行页面被看到。
+        summary += f"\n---\n\n> ⚠️ **README 更新已跳过**: {readme_warn}\n"
     with open(os.path.join(OUT_DIR, 'step_summary.md'), 'w', encoding='utf-8') as f:
         f.write(summary)
     gh_summary = os.environ.get('GITHUB_STEP_SUMMARY')
