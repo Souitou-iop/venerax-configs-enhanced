@@ -1,513 +1,305 @@
 /** @type {import('./_venera_.js')} */
-
-/**
- * 如漫画 (www.rumanhua.org)
- *
- * 章节阅读页的图片列表被 AES-128-CBC 加密后放在页面里的 `params` 变量里：
- *   key = "9S8$vJnU2ANeSRoF" (AES-128)
- *   IV  = params base64 解码后的前 16 字节
- *   密文 = base64 解码后第 16 字节往后的部分，PKCS7 填充
- * 解密后得到 JSON: { host, source_id, images: [...] }
- * 本源的图片 URL 是明文 webp（source_id=15，直接加载，无需二次解密）。
- *
- * 页面结构（PC 版）：
- * - 首页 "/"：多个 .item 卡片（a[href="/news/{id}"] + img.cover + .title/.msg）
- * - 详情页 "/news/{id}"：封面 .comicInfo .cover img，标题/作者/状态/简介 .comicInfo .info，
- *   章节 a[href="/show/{id}.html"]
- * - 章节页 "/show/{id}.html"：加密的 params 变量
- * - 分类 "/category"：进度 /category/finish/{1|2}、标签 /category/tags/{id}、
- *   排序 /category/order/{addtime|hits}，分页 /category/.../page/{n}
- * - 搜索 "/index.php/search?key={keyword}"（站点搜索当前返回空，仅作兼容）
- */
-
-// ---- 纯 JS AES-128-CBC 实现（仅解密） ----
-
-const AES_SBOX = [
-  0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
-  0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
-  0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
-  0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
-  0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
-  0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
-  0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
-  0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
-  0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
-  0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
-  0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
-  0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
-  0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
-  0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
-  0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
-  0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
-];
-const AES_RCON = [0x8d,0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36];
-const AES_RSBOX = (function () {
-  let r = new Array(256);
-  for (let i = 0; i < 256; i++) r[AES_SBOX[i]] = i;
-  return r;
-})();
-
-function aesKeyExpansion(key) {
-  const Nk = 4, Nr = 10, Nb = 4;
-  const w = new Array(Nb * (Nr + 1) * 4);
-  for (let i = 0; i < 4 * Nk; i++) w[i] = key[i];
-  const temp = new Array(4);
-  for (let i = Nk; i < Nb * (Nr + 1); i++) {
-    for (let j = 0; j < 4; j++) temp[j] = w[(i - 1) * 4 + j];
-    if (i % Nk === 0) {
-      const t0 = temp[0];
-      temp[0] = AES_SBOX[temp[1]] ^ AES_RCON[i / Nk];
-      temp[1] = AES_SBOX[temp[2]];
-      temp[2] = AES_SBOX[temp[3]];
-      temp[3] = AES_SBOX[t0];
-    }
-    for (let j = 0; j < 4; j++) w[i * 4 + j] = w[(i - Nk) * 4 + j] ^ temp[j];
-  }
-  return w;
-}
-
-function gmul(a, b) {
-  let p = 0;
-  for (let i = 0; i < 8; i++) {
-    if (b & 1) p ^= a;
-    const hi = a & 0x80;
-    a = (a << 1) & 0xff;
-    if (hi) a ^= 0x1b;
-    b >>= 1;
-  }
-  return p;
-}
-
-function aesAddRoundKey(state, w, round) {
-  for (let c = 0; c < 4; c++)
-    for (let r = 0; r < 4; r++) state[r][c] ^= w[round * 16 + c * 4 + r];
-}
-
-function aesInvSubBytes(state) {
-  for (let r = 0; r < 4; r++)
-    for (let c = 0; c < 4; c++) state[r][c] = AES_RSBOX[state[r][c]];
-}
-
-function aesInvShiftRows(state) {
-  for (let r = 1; r < 4; r++) {
-    const row = state[r].slice();
-    for (let c = 0; c < 4; c++) state[r][c] = row[(c - r + 4) % 4];
-  }
-}
-
-function aesInvMixColumns(state) {
-  for (let c = 0; c < 4; c++) {
-    const a0 = state[0][c], a1 = state[1][c], a2 = state[2][c], a3 = state[3][c];
-    state[0][c] = gmul(a0,0x0e) ^ gmul(a1,0x0b) ^ gmul(a2,0x0d) ^ gmul(a3,0x09);
-    state[1][c] = gmul(a0,0x09) ^ gmul(a1,0x0e) ^ gmul(a2,0x0b) ^ gmul(a3,0x0d);
-    state[2][c] = gmul(a0,0x0d) ^ gmul(a1,0x09) ^ gmul(a2,0x0e) ^ gmul(a3,0x0b);
-    state[3][c] = gmul(a0,0x0b) ^ gmul(a1,0x0d) ^ gmul(a2,0x09) ^ gmul(a3,0x0e);
-  }
-}
-
-function aesDecryptBlock(inputBytes, w) {
-  const Nr = 10;
-  const state = [[], [], [], []];
-  for (let i = 0; i < 16; i++) state[i % 4][Math.floor(i / 4)] = inputBytes[i];
-
-  aesAddRoundKey(state, w, Nr);
-  for (let round = Nr - 1; round >= 1; round--) {
-    aesInvShiftRows(state);
-    aesInvSubBytes(state);
-    aesAddRoundKey(state, w, round);
-    aesInvMixColumns(state);
-  }
-  aesInvShiftRows(state);
-  aesInvSubBytes(state);
-  aesAddRoundKey(state, w, 0);
-
-  const out = new Array(16);
-  for (let i = 0; i < 16; i++) out[i] = state[i % 4][Math.floor(i / 4)];
-  return out;
-}
-
-function aes128CbcDecrypt(cipherBytes, keyBytes, ivBytes) {
-  const w = aesKeyExpansion(keyBytes);
-  const out = [];
-  let prevBlock = ivBytes;
-  for (let off = 0; off < cipherBytes.length; off += 16) {
-    const block = cipherBytes.slice(off, off + 16);
-    const decrypted = aesDecryptBlock(block, w);
-    for (let i = 0; i < 16; i++) out.push(decrypted[i] ^ prevBlock[i]);
-    prevBlock = block;
-  }
-  const padLen = out[out.length - 1];
-  if (padLen > 0 && padLen <= 16) out.length -= padLen;
-  return out;
-}
-
-function base64ToBytes(b64) {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  b64 = b64.replace(/=+$/, "");
-  const bytes = [];
-  let buffer = 0,
-    bits = 0;
-  for (let i = 0; i < b64.length; i++) {
-    const idx = chars.indexOf(b64[i]);
-    if (idx < 0) continue;
-    buffer = (buffer << 6) | idx;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      bytes.push((buffer >> bits) & 0xff);
-    }
-  }
-  return bytes;
-}
-
-function utf8BytesToString(bytes) {
-  let str = "";
-  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-  return decodeURIComponent(escape(str));
-}
-
-const AES_KEY_STR = "9S8$vJnU2ANeSRoF";
-
-// 解密章节页里的 `params` 变量，返回解析后的 JSON 对象
-function decryptParams(paramsB64) {
-  const allBytes = base64ToBytes(paramsB64);
-  const iv = allBytes.slice(0, 16);
-  const ciphertext = allBytes.slice(16);
-  const keyBytes = [];
-  for (let i = 0; i < AES_KEY_STR.length; i++) {
-    keyBytes.push(AES_KEY_STR.charCodeAt(i));
-  }
-  const plainBytes = aes128CbcDecrypt(ciphertext, keyBytes, iv);
-  const plainStr = utf8BytesToString(plainBytes);
-  return JSON.parse(plainStr);
-}
-
-// ---- 源定义 ----
-
-class RuManhua extends ComicSource {
+class RuManHua extends ComicSource {
   name = "如漫画";
   key = "rumanhua";
-  version = "1.0.0";
-  minAppVersion = "1.6.0";
+  version = "1.1.0";
+  minAppVersion = "1.4.0";
 
-  // 更新链接，请替换为你自己的托管地址
-  url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rumanhua.js";
+  url =
+    "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rumanhua.js";
+  domain = "https://www.rumanhua.org";
 
-  get baseUrl() {
-    return "https://www.rumanhua.org";
-  }
+  #picScriptCache = null;
+  #decryptionKeysCache = null;
 
-  pageHeaders() {
-    return {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      "Referer": this.baseUrl + "/",
-    };
-  }
-
-  async fetchBody(label, url) {
-    let res = await Network.get(url, this.pageHeaders());
-    if (res.status !== 200) throw label + " 请求失败: " + res.status;
-    return res.body;
-  }
-
-  // 从 .item 卡片解析漫画
-  parseComicItem(el) {
-    let a = el.querySelector('a[href*="/news/"]');
-    if (!a) return null;
-    let href = a.attributes["href"] || "";
-    let m = href.match(/\/news\/(\d+)/);
-    if (!m) return null;
-    let id = m[1];
-
-    let img = el.querySelector("img");
-    let cover = img ? img.attributes["src"] || "" : "";
-    // 无封面的条目（如首页底部总排行榜 top30）直接跳过
-    if (!cover) return null;
-
-    let title = "";
-    let titleEl = el.querySelector(".title a");
-    if (titleEl) title = titleEl.text.trim();
-    if (!title && img) title = img.attributes["alt"] || img.attributes["title"] || "";
-    if (!title) title = a.attributes["title"] || id;
-
-    let subTitle = "";
-    let tipEl = el.querySelector(".msg, .op.tip");
-    if (tipEl) subTitle = tipEl.text.trim();
-
-    return new Comic({
-      id: id,
-      title: title,
-      subTitle: subTitle,
-      cover: cover,
-    });
-  }
-
-  // 解析页面里所有 .item 卡片
-  parseItemList(html) {
-    let doc = new HtmlDocument(html);
-    let seen = {};
-    let comics = [];
-    for (let el of doc.querySelectorAll(".item")) {
-      let c = this.parseComicItem(el);
-      if (!c || seen[c.id]) continue;
-      seen[c.id] = true;
-      comics.push(c);
-    }
-    doc.dispose();
-    return comics;
-  }
-
-  // 从分页链接中提取最大页数
-  extractMaxPage(html, fallback) {
-    let doc = new HtmlDocument(html);
-    let max = 1;
-    for (let a of doc.querySelectorAll("a")) {
-      let href = a.attributes["href"] || "";
-      let m = href.match(/\/page\/(\d+)/);
-      if (m) {
-        let n = parseInt(m[1]);
-        if (n > max) max = n;
-      }
-    }
-    doc.dispose();
-    return max > 1 ? max : fallback;
-  }
-
-  // 发现页
   explore = [
     {
-      title: "如漫画-首页",
-      type: "singlePageWithMultiPart",
-      load: async (page) => {
-        let body = await this.fetchBody("home", this.baseUrl + "/");
-        let comics = this.parseItemList(body);
-        let res = {};
-        res["首页"] = comics;
-        return res;
-      },
-    },
-    {
-      title: "如漫画-最新更新",
+      title: "最新更新",
       type: "multiPageComicList",
       load: async (page) => {
-        if (page > 1) return { comics: [], maxPage: 1 };
-        let body = await this.fetchBody("update", this.baseUrl + "/custom/update");
-        return { comics: this.parseItemList(body), maxPage: 1 };
+        const url = `${this.domain}/category/order/addtime${page > 1 ? `/page/${page}` : ""}`;
+        const res = await Network.get(url);
+        if (res.status !== 200) {
+          throw `HTTP Error ${res.status}`;
+        }
+        const document = new HtmlDocument(res.body);
+        const comics = this.parseComicList(document);
+        const maxPage = this.parseMaxPage(document);
+        return {
+          comics: comics,
+          maxPage: maxPage,
+        };
       },
     },
   ];
 
-  // 分类页
-  category = {
-    title: "如漫画",
-    parts: [
-      {
-        name: "进度",
-        type: "fixed",
-        itemType: "category",
-        categories: ["全部", "连载", "完结"],
-        categoryParams: ["", "finish/1", "finish/2"],
-      },
-      {
-        name: "标签",
-        type: "fixed",
-        itemType: "category",
-        categories: [
-          "奇幻", "搞笑", "都市", "热血", "穿越", "纯爱", "机甲", "竞技",
-          "病娇", "腹黑", "疯批", "颜控", "反差萌", "反派", "编剧", "双女主",
-          "玄幻", "修仙", "校园", "治愈", "科幻", "美少女", "冒险", "战斗",
-          "古风", "复仇", "修真", "少年", "系统", "大女主", "动作", "悬疑",
-          "武侠", "宫斗", "励志", "撒糖", "秀吉", "狗血", "娱乐圈", "影帝",
-          "占有欲", "古灵精怪", "大小姐", "少女", "爱情", "欢乐向", "重生", "异能",
-          "恋爱", "同人", "生活", "恐怖", "非人类", "日常", "其它", "泛爱",
-          "格斗", "日漫", "异世界", "历史", "江湖", "古代", "魔幻", "萌系",
-          "耽美", "剧情", "学生", "龙傲天", "姐姐", "打工人", "装逼", "爽",
-          "欧风", "宫廷", "长条", "轻小说", "无节操", "扮猪吃虎", "纨绔", "架空",
-          "美强惨", "女强", "御姐", "忠犬", "魔女", "百合", "逆袭", "偶像",
-          "青春", "唯美", "浪漫", "连载中", "惊奇", "彩虹", "友情", "智商在线",
-          "暧昧", "反差", "修罗场", "职场",
-        ],
-        categoryParams: [
-          "tags/2569", "tags/2570", "tags/2571", "tags/2572", "tags/2573", "tags/2574", "tags/2575", "tags/2576",
-          "tags/2577", "tags/2578", "tags/2579", "tags/2580", "tags/2581", "tags/2582", "tags/2583", "tags/2584",
-          "tags/2585", "tags/2586", "tags/2587", "tags/2588", "tags/2589", "tags/2590", "tags/2591", "tags/2592",
-          "tags/2593", "tags/2594", "tags/2595", "tags/2596", "tags/2597", "tags/2598", "tags/2599", "tags/2600",
-          "tags/2601", "tags/2602", "tags/2603", "tags/2604", "tags/2605", "tags/2606", "tags/2607", "tags/2608",
-          "tags/2609", "tags/2610", "tags/2611", "tags/2612", "tags/2613", "tags/2614", "tags/2615", "tags/2616",
-          "tags/2617", "tags/2618", "tags/2619", "tags/2620", "tags/2621", "tags/2622", "tags/2623", "tags/2624",
-          "tags/2625", "tags/2626", "tags/2627", "tags/2628", "tags/2629", "tags/2630", "tags/2631", "tags/2632",
-          "tags/2633", "tags/2634", "tags/2635", "tags/2636", "tags/2637", "tags/2638", "tags/2639", "tags/2640",
-          "tags/2641", "tags/2642", "tags/2643", "tags/2644", "tags/2645", "tags/2646", "tags/2647", "tags/2648",
-          "tags/2649", "tags/2650", "tags/2651", "tags/2652", "tags/2653", "tags/2654", "tags/2655", "tags/2656",
-          "tags/2657", "tags/2658", "tags/2659", "tags/2660", "tags/2661", "tags/2662", "tags/2663", "tags/2664",
-          "tags/2665", "tags/2666", "tags/2667", "tags/2668",
-        ],
-      },
-      {
-        name: "排序",
-        type: "fixed",
-        itemType: "category",
-        categories: ["更新时间", "热门人气"],
-        categoryParams: ["order/addtime", "order/hits"],
-      },
-    ],
-    enableRankingPage: false,
-  };
+  async _init() {
+    var tpl_path = "/template/pc/32/",
+      params =
+        "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";
 
-  // 分类漫画加载
-  categoryComics = {
-    load: async (category, param, options, page) => {
-      let path = "/category";
-      if (param) path += "/" + param;
-      if (page && page > 1) path += `/page/${page}`;
+    this.decryptParams(params, await this.aesKey());
+  }
 
-      let body = await this.fetchBody("categoryComics", this.baseUrl + path);
-      let comics = this.parseItemList(body);
-      let maxPage = this.extractMaxPage(body, comics.length > 0 ? page : 1);
-      if (maxPage < 1) maxPage = 1;
+  init() {
+    this._init();
+  }
 
-      return { comics: comics, maxPage: maxPage };
-    },
-    optionList: [],
-  };
+  parseComicList(document) {
+    const comicElements = document.querySelectorAll(".list > .item");
+    const comics = [];
+    for (const element of comicElements) {
+      let temp = this.parseComic(element);
+      if (temp) {
+        comics.push(temp);
+      }
+    }
+    return comics;
+  }
 
-  // 搜索（站点搜索当前返回空，仅做兼容；按站点自己的端点实现）
+  parseComic(element) {
+    const linkElement = element.querySelector(".info a");
+    if (linkElement) {
+      const id = linkElement.attributes["href"];
+      const title = linkElement.attributes["title"];
+
+      const imgElement = element.querySelector(".img img");
+      const cover = imgElement.attributes["src"];
+
+      const latestChapterElement = element.querySelector(".tip");
+      const subTitle = latestChapterElement ? latestChapterElement.text : "";
+
+      const descriptionElement = element.querySelector(".info .line .ibcont");
+      const description = descriptionElement ? descriptionElement.text : "";
+
+      const tagElements = element.querySelectorAll(
+        ".info .line a[href*='/tags/']",
+      );
+      const tags = tagElements.map((a) => a.text.trim());
+
+      return new Comic({
+        id: id,
+        title: title,
+        subTitle: subTitle,
+        cover: cover,
+        tags: tags,
+        description: description,
+      });
+    }
+    return null;
+  }
+
+  parseMaxPage(document) {
+    const pageLinks = document.querySelectorAll(".divpage a.end");
+    if (pageLinks.length > 0) {
+      const href = pageLinks[0].attributes["href"];
+      if (href) {
+        const match = href.match(/page\/(\d+)/);
+        if (match) {
+          return parseInt(match[1], 10);
+        }
+      }
+    }
+
+    const onPage = document.querySelector(".divpage a.on");
+    if (onPage) {
+      return parseInt(onPage.text, 10);
+    }
+
+    return 1;
+  }
+
   search = {
     load: async (keyword, options, page) => {
-      let kw = encodeURIComponent(keyword);
-      let url;
-      if (!page || page <= 1) {
-        url = `${this.baseUrl}/index.php/search?key=${kw}`;
-      } else {
-        url = `${this.baseUrl}/search/${kw}/${page}`;
-      }
-      let body = await this.fetchBody("search", url);
-      let comics = this.parseItemList(body);
-      return { comics: comics, maxPage: comics.length > 0 ? page : 1 };
+      return {
+        comics: [],
+        maxPage: 0,
+      };
     },
-    optionList: [],
-    enableTagsSuggestions: false,
   };
 
-  // 单本漫画
   comic = {
     loadInfo: async (id) => {
-      let body = await this.fetchBody("detail", this.baseUrl + "/news/" + id);
-      let doc = new HtmlDocument(body);
-
-      // 封面与标题
-      let cover = "";
-      let title = "";
-      let coverImg = doc.querySelector(".comicInfo .cover img");
-      if (coverImg) {
-        cover = coverImg.attributes["src"] || "";
-        title = coverImg.attributes["alt"] || coverImg.attributes["title"] || "";
+      const res = await Network.get(this.domain + id);
+      if (res.status !== 200) {
+        throw `HTTP Error ${res.status}`;
       }
-      if (!title) {
-        let titleEl = doc.querySelector(".comicInfo .info .title");
-        if (titleEl) {
-          title = titleEl.text.trim().replace(/^\d+(\.\d+)?分/, "").trim();
-        }
-      }
-      if (!title) title = id;
+      const document = new HtmlDocument(res.body);
 
-      // 作者、状态
+      const title = document
+        .querySelector(".comicInfo .title")
+        .text.replace(/.*?分/g, "")
+        .trim();
+      const cover = document.querySelector(".comicInfo .cover .img img")
+        .attributes["src"];
+
+      const infoElements = document.querySelectorAll(".comicInfo .info p");
       let author = "";
-      let status = "";
-      for (let sp of doc.querySelectorAll(".comicInfo .info span")) {
-        let text = sp.text.trim();
-        if (text.startsWith("作  者：")) {
-          author = text.replace("作  者：", "").trim();
-        } else if (text.startsWith("状  态：")) {
-          status = text.replace("状  态：", "").trim();
-        }
-      }
-
-      // 简介
-      let description = "";
-      let descEl = doc.querySelector(".comicInfo .info .content");
-      if (descEl) description = descEl.text.trim();
-
-      // 标签
       let tags = [];
-      for (let a of doc.querySelectorAll('a[href*="/category/tags/"]')) {
-        let t = a.text ? a.text.trim() : "";
-        if (t) tags.push(t);
-      }
+      let status = "unknown";
 
-      // 章节
-      let chapters = new Map();
-      for (let a of doc.querySelectorAll('a[href*="/show/"]')) {
-        let href = a.attributes["href"] || "";
-        let m = href.match(/\/show\/([A-Za-z0-9]+)\.html/);
-        if (!m) continue;
-        let chTitle = a.text ? a.text.trim() : "";
-        if (!chTitle) continue;
-        chapters.set(m[1], chTitle);
-      }
+      infoElements.forEach((p) => {
+        const text = p.text;
+        if (text.includes("作  者：")) {
+          author = text.replace("作  者：", "").trim();
+        } else if (text.includes("类  别：")) {
+          p.querySelectorAll("a").forEach((a) => tags.push(a.text.trim()));
+        } else if (text.includes("状  态：")) {
+          const statusText = text.replace("状  态：", "").trim();
+          if (statusText === "连载中") {
+            status = "ongoing";
+          } else if (statusText === "已完结") {
+            status = "completed";
+          }
+        }
+      });
 
-      doc.dispose();
+      const description = document
+        .querySelector(".comicInfo .info .content")
+        .text.trim();
 
-      if (chapters.size === 0) throw "未解析到章节列表";
-
-      let tagMap = {};
-      if (author) tagMap["作者"] = [author];
-      if (status) tagMap["状态"] = [status];
-      if (tags.length) tagMap["标签"] = tags;
+      const chapterElements = document.querySelectorAll(
+        "#chapterlistload .list a",
+      );
+      const chapters = new Map();
+      chapterElements.forEach((el) => {
+        const chapterId = el.attributes["href"];
+        const chapterTitle = el.text.trim();
+        chapters.set(chapterId, chapterTitle);
+      });
 
       return new ComicDetails({
+        id: id,
         title: title,
-        subtitle: author,
         cover: cover,
+        author: author,
         description: description,
-        tags: tagMap,
+        tags: { 类型: tags },
+        status: status,
         chapters: chapters,
       });
     },
 
     loadEp: async (comicId, epId) => {
-      let body = await this.fetchBody("ep", this.baseUrl + "/show/" + epId + ".html");
-      let m = body.match(/params\s*=\s*'([^']+)'/);
-      if (!m) {
-        throw "未找到加密参数(params)，页面结构可能已变化";
+      const res = await Network.get(this.domain + epId);
+      if (res.status !== 200) {
+        throw `HTTP Error ${res.status}`;
       }
-      let data;
-      try {
-        data = decryptParams(m[1]);
-      } catch (e) {
-        throw `解密章节数据失败: ${e.message || e}`;
+
+      const body = res.body;
+      const paramsMatch = body.match(/params = '([^']+)';/);
+
+      if (!paramsMatch || paramsMatch.length < 2) {
+        const imageElements = new HtmlDocument(body).querySelectorAll(
+          "#images img.lazy-read",
+        );
+        const images = imageElements.map((el) => el.attributes["data-src"]);
+        return { images };
       }
-      let images = data.images || [];
-      if (images.length === 0) {
-        throw "章节图片列表为空";
-      }
-      return { images: images };
+
+      const encryptedParams = paramsMatch[1];
+      const keys = await this.getDecryptionKeys();
+      const decrypted = await this.decryptParams(
+        encryptedParams,
+        keys.decryptParamsKey,
+      );
+
+      const images = decrypted.images;
+
+      return { images };
     },
 
-    onImageLoad: (url) => {
+    onImageLoad: (url, comicId, epId) => {
       return {
-        url: url,
+        url,
         headers: {
-          Referer: "https://www.rumanhua.org/",
           "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-          "Accept-Language": "zh-CN,zh;q=0.9",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36 Edg/103.0.1264.71",
+          Referer: this.domain,
+          Accept:
+            "image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+          "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+          "Cache-Control": "max-age=0",
+          Connection: "keep-alive",
+          "Upgrade-Insecure-Requests": "1",
         },
       };
     },
 
-    // 从外部链接识别漫画 id，如 https://www.rumanhua.org/news/524238
+    idMatch: "/news/\\d+",
+
     link: {
-      domains: ["rumanhua.org"],
+      domains: ["www.rumanhua.org"],
       linkToId: (url) => {
-        let m = url.match(/\/news\/(\d+)/);
-        return m ? m[1] : null;
+        const match = url.match(/\/news\/\d+/);
+        return match ? match[0] : null;
       },
     },
   };
+
+  // --- Decryption Logic ---
+  async getDecryptionKeys() {
+    if (this.#decryptionKeysCache) {
+      return this.#decryptionKeysCache;
+    }
+
+    const decryptParamsKey = await this.aesKey();
+
+    this.#decryptionKeysCache = {
+      decryptParamsKey: decryptParamsKey,
+    };
+    return this.#decryptionKeysCache;
+  }
+
+  // Obfuscated key - decoded at runtime
+  async aesKey() {
+    // This key is obfuscated to avoid being easily extracted
+    const encodedKey = "OVM4JHZKblUyQU5lU1JvRg==";
+    return await Convert.decodeUtf8(await Convert.decodeBase64(encodedKey));
+  }
+  removePkcs7Padding(buffer) {
+    const len = buffer.length;
+    const pad = buffer[len - 1];
+    if (pad <= 16) {
+      return buffer.slice(0, len - pad);
+    }
+    return buffer;
+  }
+
+  async decryptParams(encryptedParams, key) {
+    try {
+      // 1. Key 固定
+      const keyStr = key; // "9S8$vJnU2ANeSRoF";
+      const keyBuffer = await Convert.encodeUtf8(keyStr);
+      // 2. Base64 decode
+      const decoded = await Convert.decodeBase64(encryptedParams); // ArrayBuffer
+      try {
+        // 3. 取 IV 和 ciphertext
+        const decodedBytes = new Uint8Array(decoded);
+        const ivBytes = decodedBytes.slice(0, 16); // 前16字节
+        const ciphertextBytes = decodedBytes.slice(16); // 剩余部分
+
+        // 4. CBC 解密
+        const decryptedBuffer = await Convert.decryptAesCbc(
+          ciphertextBytes.buffer,
+          keyBuffer,
+          ivBytes.buffer,
+        );
+        // 5. 转 UTF-8
+        let decryptedBytes = new Uint8Array(decryptedBuffer);
+        decryptedBytes = this.removePkcs7Padding(decryptedBytes); // 去掉 PKCS7
+
+        const decryptedText = await Convert.decodeUtf8(decryptedBytes.buffer);
+
+        return JSON.parse(decryptedText);
+      } catch (e) {
+        console.warn(" An error occurred during decryption 2:" + e.message);
+      }
+
+      return [];
+    } catch (e) {
+      console.error("An error occurred during decryption:" + e.message);
+      return [];
+    }
+  }
 }

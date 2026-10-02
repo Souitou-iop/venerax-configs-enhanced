@@ -2,7 +2,7 @@ class Zaimanhua extends ComicSource {
   // 基础信息
   name = "再漫画";
   key = "zaimanhua";
-  version = "1.0.2";
+  version = "1.0.3";
   minAppVersion = "1.0.0";
   url =
     "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/zaimanhua.js";
@@ -317,8 +317,8 @@ class Zaimanhua extends ComicSource {
         );
         const data = JSON.parse(res.body).data;
         return {
-          comics: data.subList.map((item) => this.parseComic(item)) ?? [],
-          maxPage: Math.ceil(data.total / 20),
+          comics: (data.subList || []).map((item) => this.parseComic(item)),
+          maxPage: Math.ceil((data.total || 0) / 20),
         };
       } catch (e) {
         console.error("加载收藏失败:", e);
@@ -394,6 +394,7 @@ class Zaimanhua extends ComicSource {
         this.buildUrl(`comic/chapter/${comicId}/${epId}`),
         this.headers
       );
+      this.checkResponseStatus(res);
       const data = JSON.parse(res.body).data.data;
       return { images: data.page_url_hd || data.page_url };
     },

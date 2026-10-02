@@ -44,6 +44,7 @@ import hmac as hmac_mod
 import importlib.util
 import random
 import subprocess
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -69,6 +70,7 @@ def http_req(url, headers=None, data=None, method="GET", timeout=12, max_bytes=1
     h = {"User-Agent": UA_BROWSER}
     if headers:
         h.update(headers)
+    url = urllib.parse.quote(url, safe=":/?&=#%+@[]!$'()*;,~-._")
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     ctx = ssl._create_unverified_context() if insecure else None
     t0 = time.time()
@@ -262,11 +264,11 @@ def build_problem_report(overseas):
         return (f"### ✅ 本次探测未发现异常源\n\n"
                 f"内容级探测覆盖 {n_content} 个源，其中 **{n_ok} 个真实下载到漫画图片**，其余为需登录/风控冷却等非故障状态。\n\n")
     md = f"### 🚨 异常源报告（本次探测发现 {len(problems)} 个源存在问题）\n\n"
-    md += ("> 以下判定来自端到端内容级探测（真实走完 搜索→详情→章节→下载图片），"
-           "不是单纯的服务器连通性检查。\n\n")
-    md += "| 漫画源 | 出了什么问题 | 具体情况 |\n| :--- | :--- | :--- |\n"
+    md += ("> 以下按各源实际探测深度报告异常；连通级只反映入口响应，"
+           "不代表正文图片通过或失败。\n\n")
+    md += "| 漫画源 | 探测深度 | 出了什么问题 | 具体情况 |\n| :--- | :--- | :--- | :--- |\n"
     for k, v in problems:
-        md += f"| **{hhc.PROBES[k]['name']}** | {PROBLEM_EXPLAIN[v['verdict']]} | {v['detail'] or '—'} |\n"
+        md += f"| **{hhc.PROBES[k]['name']}** | {v['tier']} | {PROBLEM_EXPLAIN[v['verdict']]} | {v['detail'] or '—'} |\n"
     return md + "\n"
 
 
@@ -796,39 +798,61 @@ def e2e_html_aes_source(name, search_url, base_url, detail_pattern, chapter_patt
     if code != 200:
         return result('ERROR', 'content', code=code, detail="详情请求失败", steps=steps)
     detail_text = detail.decode("utf-8", "ignore") if isinstance(detail, (bytes, bytearray)) else detail
-    cm = re.search(chapter_pattern, detail_text, re.I)
-    if not cm:
-        return result('ERROR', 'content', code=code, detail="未解析到章节链接", steps=steps)
-    chapter_url = cm.group(0) if cm.group(0).startswith("http") else base_url + cm.group(0)
-    code, chapter, ms = http_req(chapter_url, headers=h, timeout=15)
-    steps.append(f"章节页 → HTTP {code} ({ms}ms)")
-    if code != 200:
-        return result('ERROR', 'content', code=code, detail="章节请求失败", steps=steps)
-    chapter_text = chapter.decode("utf-8", "ignore") if isinstance(chapter, (bytes, bytearray)) else chapter
-    pm = re.search(r"params\s*=\s*'([^']+)'", chapter_text)
-    if not pm:
-        return result('ERROR', 'content', code=code, detail="未找到加密 params", steps=steps)
-    try:
-        data = decrypt_html_params(pm.group(1))
-        images = data.get('images') or []
-    except Exception as exc:
-        return result('ERROR', 'content', code=code, detail=f"章节解密失败: {exc}", steps=steps)
-    if not images:
-        return result('ERROR', 'content', code=code, detail="章节图片列表为空", steps=steps)
+    chapter_urls = []
+    for anchor in re.finditer(r'<a\b[^>]*href=[\"\']([^\"\']+)[\"\'][^>]*>(.*?)</a>', detail_text, re.I | re.S):
+        cm = re.search(chapter_pattern, anchor.group(1), re.I)
+        title = re.sub(r'<[^>]+>', '', anchor.group(2))
+        if cm and not re.search(r'预告|公告|通知|宣传|请假|活动|人设|设定', title):
+            link = cm.group(0)
+            chapter_url = link if link.startswith('http') else base_url + link
+            if chapter_url not in chapter_urls:
+                chapter_urls.append(chapter_url)
+    if not chapter_urls:
+        return result('ERROR', 'content', code=code, detail="未解析到正文章节链接", steps=steps)
     last_code, last_kind, last_ms = None, None, -1
-    for raw_image_url in images[:5]:
-        image_url = raw_image_url
-        if not re.match(r"^https?://", image_url):
-            image_url = image_prefix + image_url
-        code, image, ms = http_req(image_url, headers={"User-Agent": UA_BROWSER, "Referer": chapter_url}, timeout=15)
-        kind = img_magic(image)
-        last_code, last_kind, last_ms = code, kind, ms
-        steps.append(f"下载图片 → HTTP {code}, {len(image)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
-        if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
-            return result('OK_CONTENT', 'content', latency=ms, code=200,
-                          detail=f"端到端成功: {len(image)} 字节 {kind}", steps=steps)
+    last_error = "章节图片列表为空"
+    for chapter_url in chapter_urls[:3]:
+        code, chapter, ms = http_req(chapter_url, headers=h, timeout=15)
+        last_code, last_ms = code, ms
+        steps.append(f"章节页 → HTTP {code} ({ms}ms)")
+        if code != 200:
+            last_error = "章节请求失败"
+            continue
+        chapter_text = chapter.decode("utf-8", "ignore") if isinstance(chapter, (bytes, bytearray)) else chapter
+        pm = re.search(r"params\s*=\s*'([^']+)'", chapter_text)
+        try:
+            if pm:
+                images = decrypt_html_params(pm.group(1)).get('images') or []
+            else:
+                images = []
+                for tag in re.findall(r'<img\b[^>]*>', chapter_text, re.I):
+                    if not re.search(r'class=[\"\'][^\"\']*\blazy-read\b', tag, re.I):
+                        continue
+                    source = re.search(r'data-src=[\"\']([^\"\']+)[\"\']', tag, re.I)
+                    if source:
+                        images.append(source.group(1))
+        except Exception as exc:
+            last_error = f"章节解密失败: {exc}"
+            continue
+        if not images or (len(images) <= 2 and len(chapter_urls) > 1):
+            last_error = "章节无正文图片或仅有短篇宣传样本"
+            continue
+        middle = len(images) // 2
+        candidates = list(dict.fromkeys(images[middle:middle + 2] + images[:3]))
+        for raw_image_url in candidates[:5]:
+            image_url = raw_image_url
+            if not re.match(r"^https?://", image_url):
+                image_url = image_prefix + image_url
+            code, image, ms = http_req(image_url, headers={"User-Agent": UA_BROWSER, "Referer": chapter_url}, timeout=15)
+            kind = img_magic(image)
+            last_code, last_kind, last_ms = code, kind, ms
+            steps.append(f"下载图片 → HTTP {code}, {len(image)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
+            if code == 200 and len(image) >= 3000 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+                return result('OK_CONTENT', 'content', latency=ms, code=200,
+                              detail=f"端到端成功: {len(image)} 字节 {kind}", steps=steps)
+        last_error = f"图片链路失败 ({last_kind or last_code})"
     return result('ERROR', 'content', latency=last_ms, code=last_code,
-                  detail=f"图片链路失败 ({last_kind or last_code})", steps=steps)
+                  detail=last_error, steps=steps)
 
 
 def e2e_manga51():
@@ -842,7 +866,7 @@ def e2e_manga51():
 
 def e2e_rumanhua():
     return e2e_html_aes_source(
-        '如漫画', 'https://www.rumanhua.org/category/tags/2654',
+        '如漫画', 'https://www.rumanhua.org/category/order/addtime',
         'https://www.rumanhua.org', r'/news/[0-9]+', r'/show/[A-Za-z0-9]+\.html',
         search_headers={"User-Agent": UA_BROWSER, "Referer": "https://www.rumanhua.org/"},
     )
@@ -1192,7 +1216,7 @@ def e2e_manhuagui():
     站点对部分网络 403, 以实际响应诚实判定。"""
     steps = []
     base = "https://www.manhuagui.com"
-    h = {"User-Agent": UA_BROWSER, "Referer": base + "/"}
+    h = dict(hhc.PROBES['ManHuaGui']['headers'])
     code, body, ms = http_req(base + '/', headers=h, timeout=15)
     steps.append(f"首页 → HTTP {code} ({ms}ms)")
     if code != 200:
@@ -1211,7 +1235,8 @@ def e2e_manhuagui():
         return result('ERROR', 'content', detail="详情页无章节链接", steps=steps)
     epid = m.group(1).decode()
 
-    code, body, ms = http_req(f"{base}/comic/{cid}/{epid}.html", headers=h, timeout=15)
+    code, body, ms = http_req(f"{base}/comic/{cid}/{epid}.html",
+                              headers={**h, 'Referer': f'{base}/comic/{cid}/'}, timeout=15)
     steps.append(f"章节页 → HTTP {code} ({ms}ms)")
     if code != 200:
         return result('ERROR', 'content', code=code, steps=steps)
@@ -1243,9 +1268,11 @@ def e2e_manhuagui():
     qs = f"?e={sl['e']}&m={sl['m']}" if sl.get('e') is not None else ""
     steps.append(f"解包出 {len(files)} 张图")
 
+    image_headers = {**h, 'Referer': base + '/',
+                     'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'}
     code, body, ms, kind = 'ERR', b'', -1, None
     for domain in ('us.hamreus.com', 'i.hamreus.com'):
-        code, body, ms = http_req(f"https://{domain}{path}{files[0]}{qs}", headers=h, timeout=15)
+        code, body, ms = http_req(f"https://{domain}{path}{files[0]}{qs}", headers=image_headers, timeout=15)
         kind = img_magic(body)
         steps.append(f"下载 {domain} → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
         if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
@@ -1375,7 +1402,7 @@ DATA_PROBES = {'picacg': e2e_picacg, 'jm': e2e_jm, 'ccc': e2e_ccc}
 
 
 def run_overseas():
-    print("\n🌍 [海外列] 端到端内容级探测（搜索→详情→章节→真实图片字节）...")
+    print("\n🌍 [海外列] 按源分级探测（内容／数据／连通）...")
     results = {}
     for key, p in hhc.PROBES.items():
         name = p['name']
@@ -1387,7 +1414,8 @@ def run_overseas():
             else:
                 res = conn_probe(key)
         except Exception as e:
-            res = result('ERROR', 'conn', detail=f"探针自身异常: {e}")
+            tier = 'content' if key in CONTENT_PROBES else 'data' if key in DATA_PROBES else 'conn'
+            res = result('ERROR', tier, detail=f"探针自身异常: {e}")
         results[key] = res
         print(f"  [{key:16}] {res['verdict']:14} ({res['latency_ms']}ms) {res['detail'][:70]}")
         time.sleep(0.3)
@@ -1424,18 +1452,22 @@ def build_readme_section(overseas, mainland, engine_name):
 > 🌐 **双网络实测节点**：**中国大陆直连**（{engine_name}） vs **海外代理网络**（GitHub Actions Runner）  
 > 🔬 **探测深度**：`内容级` = 真实走完 搜索→详情→章节→下载图片字节 并校验图片格式；`数据级` = 业务接口返回可解析数据；`连通级` = 仅状态码  
 > 🚦 **判定口径（诚实版）**：🟢 端到端正常/数据正常/可连通 ｜ 🟠 风控·限频·配额耗尽 ｜ 🟡 需登录 ｜ 🔴 被拦截 (403/429/210，**不再亮绿灯**) ｜ ❌ 无法直连
+> **覆盖说明**：按表内深度解释结果；新增源目前为连通级，不能据此判断正文是否可读；大陆节点缺项显示“未测”。
 
-{problem_report}| 漫画源 | 线路 / 分流选项 | 探测深度 | 大陆骨干直连实测 | 海外代理实测 (端到端判定) | 实测说明 |
+{problem_report}| 漫画源 | 线路 / 分流选项 | 探测深度 | 大陆骨干直连实测 | 海外代理实测 (分级判定) | 实测说明 |
 | :--- | :--- | :---: | :---: | :---: | :--- |
 """
     for key, p in hhc.PROBES.items():
         ov = overseas.get(key) or result('NOT_IMPLEMENTED', 'none')
-        cn = mainland.get(key, {'latency': -1, 'code': 'ERR'}) if mainland else {'latency': -1, 'code': 'ERR'}
+        cn = mainland.get(key) if mainland else None
+        cn_badge = mainland_badge(cn['latency'], cn['code']) if cn else '未测（节点未覆盖或引擎不可用）'
         lat = f" (~{ov['latency_ms']}ms)" if ov['latency_ms'] and ov['latency_ms'] > 0 else ""
         badge = f"{VERDICT_BADGE[ov['verdict']]}{lat}"
         note = ov['detail'] or '—'
+        if ov['tier'] == 'conn' and p.get('advice'):
+            note += '; ' + p['advice']
         md += (f"| **{p['name']}** | {p['line_opts']} | {TIER_LABEL[ov['tier']]} | "
-               f"{mainland_badge(cn['latency'], cn['code'])} | {badge} | {note} |\n")
+               f"{cn_badge} | {badge} | {note} |\n")
     md += f"\n---\n\n{end_marker}\n"
     return md
 
@@ -1511,31 +1543,32 @@ def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
     md = "# 🩺 VeneraX 漫画源端到端探活报告 (E2E)\n\n"
     md += f"- **测速时间**：{get_dual_time_str(True)}\n"
     md += f"- **大陆直连引擎**：`{engine_name or '全部失效 (已报警)'}`\n"
-    md += f"- **海外探测方式**：`GitHub Actions Runner 端到端 (搜索→章节→真实图片字节)`\n\n"
+    md += f"- **海外探测方式**：`GitHub Actions Runner 按源采用内容／数据／连通分级探测`\n\n"
     if alert_msg:
         md += f"### 🚨 异常告警提醒\n> {alert_msg}\n\n"
     md += "| 漫画源 | 探测深度 | 判定 | 海外实测 | 大陆连通 |\n| :--- | :---: | :--- | :---: | :---: |\n"
     for key, p in hhc.PROBES.items():
         ov = overseas.get(key) or result('NOT_IMPLEMENTED', 'none')
-        cn = mainland.get(key, {'latency': -1, 'code': 'ERR'}) if mainland else {'latency': -1, 'code': 'ERR'}
+        cn = mainland.get(key) if mainland else None
+        cn_cell = f"`{cn['code']}` ({cn['latency']}ms)" if cn else '未测（节点未覆盖或引擎不可用）'
         ov_code = ov['code'] if ov['code'] is not None else '-'
         md += (f"| **{p['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | "
-               f"`{ov_code}` ({ov['latency_ms']}ms) | `{cn['code']}` ({cn['latency']}ms) |\n")
+               f"`{ov_code}` ({ov['latency_ms']}ms) | {cn_cell} |\n")
     return md
 
 
 def build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad):
-    body = f"## 🚨 [VeneraX 端到端探活告警] 内容级探测发现真实异常\n\n"
+    body = f"## 🚨 [VeneraX 探活告警] 源探测发现异常\n\n"
     body += f"- **检测时间**：{get_dual_time_str(True)}\n"
     body += f"- **大陆直连引擎**：`{engine_name or '全部失效 (已报警)'}`\n\n"
     if not mainland:
         body += "### ❗ 大陆双探活引擎失效\n私有 SSH 探针连接失败，且 Globalping 备用公共探针无响应。请检查探针服务器或 Secrets 配置。\n\n"
     if content_bad:
-        body += "### 📉 内容级异常（API 连通但实际读不到漫画，现行探针无法发现此类故障）\n\n"
-        body += "| 漫画源 | 判定 | 详情 |\n| :--- | :--- | :--- |\n"
+        body += "### 📉 源探测异常（按实际探测深度判定）\n\n"
+        body += "| 漫画源 | 探测深度 | 判定 | 详情 |\n| :--- | :--- | :--- | :--- |\n"
         for k in content_bad:
             ov = overseas[k]
-            body += f"| **{hhc.PROBES[k]['name']}** | {VERDICT_BADGE[ov['verdict']]} | {ov['detail']} |\n"
+            body += f"| **{hhc.PROBES[k]['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | {ov['detail']} |\n"
         body += "\n"
     if conn_core_bad:
         names = "、".join(hhc.PROBES[k]['name'] for k in conn_core_bad)
@@ -1587,7 +1620,7 @@ def main():
     has_alert = update_alert_state(overseas, mainland, engine_failed, conn_core_bad) if PRODUCTION else (engine_failed or bool(content_bad) or bool(conn_core_bad))
     alert_msg = None
     if has_alert:
-        alert_msg = "内容级探测发现真实异常" if (content_bad or conn_core_bad) else "大陆双探活引擎失效"
+        alert_msg = "源探测发现异常" if (content_bad or conn_core_bad) else "大陆双探活引擎失效"
         alert_body = build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad)
         with open(os.path.join(OUT_DIR, 'health_check_alert.md'), 'w', encoding='utf-8') as f:
             f.write(alert_body)

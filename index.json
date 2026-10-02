@@ -27,8 +27,8 @@
     "name": "再漫画",
     "fileName": "zaimanhua.js",
     "key": "zaimanhua",
-    "version": "1.0.2",
-    "description": "中文日漫综合补充源：搜索、分类与长篇连载目录",
+    "version": "1.0.3",
+    "description": "中文综合源：搜索与分类、章节状态校验、收藏空列表处理",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/zaimanhua.js"
   },
   {
@@ -43,8 +43,9 @@
     "name": "漫画人",
     "fileName": "manhuaren.js",
     "key": "manhuaren",
-    "version": "1.0.0",
-    "description": "经典老牌平台：多分类推荐与正文高清图直连秒开"
+    "version": "2.0.1",
+    "description": "漫画人移动站：重建搜索、分类榜单、章节与 packer 图片解析",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manhuaren.js"
   },
   {
     "name": "爱看漫",
@@ -57,8 +58,9 @@
     "name": "漫画柜",
     "fileName": "manhuagui.js",
     "key": "ManHuaGui",
-    "version": "1.2.3",
-    "description": "漫画柜：逆向新版 LZString+splic 混淆，修复新章节解密失败问题"
+    "version": "2.0.0",
+    "description": "漫画柜：搜索、分类与分组章节，内置 LZString/packer 解码；图片 CDN 受网络出口影响",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manhuagui.js"
   },
   {
     "name": "禁漫天堂",
@@ -71,8 +73,9 @@
     "name": "Picacg / 哔咔",
     "fileName": "picacg.js",
     "key": "picacg",
-    "version": "1.0.6",
-    "description": "经典哔咔主力站：API-Key与HMAC鉴权，日榜分类全功能支持"
+    "version": "1.0.8",
+    "description": "需登录使用：专题接口、搜索分类筛选、401 重登录与评论签名修正；登录后正文尚未验证",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/picacg.js"
   },
   {
     "name": "E-Hentai",
@@ -93,7 +96,7 @@
     "name": "hitomi.la",
     "fileName": "hitomi.js",
     "key": "hitomi",
-    "version": "1.2.3",
+    "version": "2.0.0",
     "description": "高清图库：集成 galleryblock/nozomi LRU 缓存与 B-tree 搜索去重加速"
   },
   {
@@ -137,8 +140,136 @@
     "name": "如漫画",
     "fileName": "rumanhua.js",
     "key": "rumanhua",
-    "version": "1.0.0",
-    "description": "中文漫画源：更新/分类入口与章节 AES 解密；站点搜索接口当前返回空",
+    "version": "1.1.0",
+    "description": "中文漫画源：更新/分类入口与章节 AES 解密；搜索尚未实现",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rumanhua.js"
+  },
+  {
+    "name": "漫客栈",
+    "fileName": "mkzhan.js",
+    "key": "mkzhan",
+    "version": "1.0.1",
+    "description": "中文漫画：搜索、热门、章节 API 与图片；已验证公开免费章节",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/mkzhan.js"
+  },
+  {
+    "name": "动漫啦",
+    "fileName": "dongmanla.js",
+    "key": "dongmanla",
+    "version": "1.0.0",
+    "description": "中文漫画：搜索、连载完结分类、章节与图片",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/dongmanla.js"
+  },
+  {
+    "name": "Mangabz",
+    "fileName": "mangabz.js",
+    "key": "mangabz",
+    "version": "1.0.0",
+    "description": "中文漫画：列表、搜索与 chapterimage.ashx 图片解包",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/mangabz.js"
+  },
+  {
+    "name": "看漫画",
+    "fileName": "kanman.js",
+    "key": "kanman",
+    "version": "1.0.0",
+    "description": "中文漫画：列表、章节 API 与图片；搜索仅过滤排行榜条目",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/kanman.js"
+  },
+  {
+    "name": "百合会",
+    "fileName": "baihehui.js",
+    "key": "baihehui",
+    "version": "1.0.1",
+    "description": "公开漫画帖子可匿名阅读；搜索需登录，登录功能尚未验证",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/baihehui.js"
+  },
+  {
+    "name": "comick",
+    "fileName": "comick.js",
+    "key": "comick",
+    "version": "1.2.2",
+    "description": "多语言漫画：搜索、探索、章节与正文图片；单字符搜索受限",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/comick.js"
+  },
+  {
+    "name": "H-Comic",
+    "fileName": "hcomic.js",
+    "key": "hcomic",
+    "version": "1.0.0",
+    "description": "画廊漫画：搜索、探索、详情与章节图片",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/hcomic.js"
+  },
+  {
+    "name": "热辣漫画",
+    "fileName": "hot_manga.js",
+    "key": "hot_manga",
+    "version": "1.0.1",
+    "description": "漫画 API：搜索、分类、详情与图片；已验证匿名公开阅读",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/hot_manga.js"
+  },
+  {
+    "name": "漫蛙漫画",
+    "fileName": "manwaba.js",
+    "key": "manwaba",
+    "version": "2.0.4",
+    "description": "漫画列表、搜索、详情与 AES 章节图片解密",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manwaba.js"
+  },
+  {
+    "name": "漫小肆",
+    "fileName": "mxs.js",
+    "key": "mxs",
+    "version": "1.0.2",
+    "description": "中文漫画：多域名选择、搜索、章节与图片；已验证公开阅读",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/mxs.js"
+  },
+  {
+    "name": "X漫画",
+    "fileName": "xmanhua.js",
+    "key": "xmanhua",
+    "version": "1.0.0",
+    "description": "中文漫画：列表、搜索与 ashx 章节图片解包",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/xmanhua.js"
+  },
+  {
+    "name": "思思漫画",
+    "fileName": "sisimanhua.js",
+    "key": "sisimanhua",
+    "version": "1.0.0",
+    "description": "中文漫画：搜索、章节与 base64 图片解析；探索分页待复核",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/sisimanhua.js"
+  },
+  {
+    "name": "布卡漫画",
+    "fileName": "bukamh.js",
+    "key": "bukamh",
+    "version": "1.0.0",
+    "description": "中文漫画：搜索、AES 章节与图片响应解密；探索分页待复核",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/bukamh.js"
+  },
+  {
+    "name": "嬉皮漫画",
+    "fileName": "hipmh.js",
+    "key": "hipmh",
+    "version": "1.0.1",
+    "description": "中文漫画：独立 API、搜索、章节图片解密与陷阱图过滤",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/hipmh.js"
+  },
+  {
+    "name": "W漫画",
+    "fileName": "wmanhua.js",
+    "key": "wmanhua",
+    "version": "1.0.3",
+    "description": "中文漫画：搜索、探索、详情与正文图片",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/wmanhua.js"
+  },
+  {
+    "name": "神奇漫画",
+    "fileName": "shenqimanhua.js",
+    "key": "shenqimanhua",
+    "version": "1.1.1",
+    "description": "中文漫画：搜索、探索、详情与正文图片",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/shenqimanhua.js"
   }
 ]

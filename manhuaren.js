@@ -1,475 +1,728 @@
 /** @type {import('../_venera_.js')} */
+
+/**
+ * 漫画人 (manhuaren.com) —— Venera 漫画源（完全重写版 v2）
+ *
+ * ============================ 站点分析 ============================
+ * 站点: 漫画人/DM5 移动版 (www.manhuaren.com)，匿名可访问，无需登录。
+ * 分析依据: _analysis/fixtures/manhuaren/ 下 2026-09-11 的真实抓取夹具
+ *           (manifest.jsonl 逐条记录来源 URL/状态/字节/抓取时间)。
+ *
+ * 1) 搜索      /search?title={kw}&language=1&page={page}
+ *              列表: ul.book-list > li
+ *                    .book-list-cover a[href][title] + img.book-list-cover-img[src]
+ *                    .book-list-info-title / .book-list-info-desc
+ *                    .book-list-info-bottom-item(标签) / .book-list-info-bottom-right-font(连载状态)
+ *              (夹具 search_ship.html, 22 条)
+ * 2) 分类列表  /manhua-list/            最热门
+ *              /manhua-list-s2/         最近更新
+ *              /manhua-list-s18/        最新上架
+ *              /manhua-list-st2/        已完结
+ *              /manhua-list-st1/        连载中
+ *              (路径取自夹具 manhua_list.html 顶部 manga-list-bar 的自有链接)
+ *              列表: .manga-list > ul.manga-list-2 > li
+ *                    .manga-list-2-cover a[href] + img.manga-list-2-cover-img[src]
+ *                    .manga-list-2-title / .manga-list-2-tip("最新 第178话")
+ *              (夹具 manhua_list.html, 21 条 = 站点 pagesize)
+ *              注意: 该页没有 HTML 分页，下一页由 dm5.ashx AJAX(POST) 提供，
+ *              而匿名 POST dm5.ashx 返回 0 字节(夹具 category_dm5.json, 0B)，故不实现翻页。
+ * 3) 排行榜    /manhua-rank/  (夹具 rank.html)
+ *              ul.rank-list#rankList_1..4 = 人气榜/新番榜/收藏榜/吐槽榜，各 30 条
+ *              结构: ul.rank-list > a[href=/manhua-<slug>/] > li
+ *                    .rank-list-cover-img / .rank-list-info-right-title
+ *                    .rank-list-info-right-subtitle / .rank-list-info-left-index
+ *              (排行榜把 li 包在 a 内，属站点畸形 HTML，故按 a 聚合而不是 li)
+ * 4) 详情      /manhua-{slug}/  (夹具 detail_haizeiwang.html)
+ *              .detail-main-info-title / .detail-main-cover img
+ *              .detail-main-info-author a / .detail-main-info-class a(标签)
+ *              .detail-main-info-star.star-4(评分) / .detail-desc(简介)
+ *              .normal-top-title(标题兜底)
+ *              内联变量: var DM5_MID=432 (评论接口需要的 mid)
+ *              章节列表: .detail-list 内的 /m{cid}/ 链接(移动版详情页章节容器)
+ * 5) 章节      /m{cid}/  (夹具 chapter_m425189.html)
+ *              页面用 Dean Edwards packer 保护图片数组:
+ *              eval(function(p,a,c,k,e,d){...}('K s=[...]',49,49,'...'.split('|'),0,{}))
+ *              解包后得到 var newImgs=[ 'https://manhua1032-61-174-50-99.cdndm5.com/17/16932/425189/1_8042.jpg?cid=425189&key=...&type=1', ... ]
+ *              (夹具实测 30 张，顺序与页内 <label id="lbcurrentpage">1</label>/30 一致)
+ *              内联变量: var mid="16932"; var cid="425189"
+ * 6) 评论      JSON 数组，字段 Poster/PostContent/PostTime/Id/HeadUrl/PraiseCount/IsPraise/ToPostShowDataItems
+ *              详情评论 /manhua-{mid}/pagerdata.ashx?d=&pageindex=&pagesize=&mid=&t=4
+ *                       (夹具 detail_pagerdata.json, 10 条)
+ *              章节评论 /showcomment/pagerdata.ashx?d=&pageindex=&pagesize=&cid=&t=9
+ *                       (夹具 comments_chapter.json, 1 条)
+ * 7) 图片      漫画图床为 *.cdndm5.com，需带 Referer(章节页) 与 UA。
+ * ==================================================================
+ */
+
 class ManHuaRen extends ComicSource {
     name = "漫画人"
 
     key = "manhuaren"
 
-    version = "1.0.0"
+    version = "2.0.1"
 
     minAppVersion = "1.6.0"
 
-    url = "https://cdn.jsdelivr.net/gh/venera-app/venera-configs@main/manhuaren.js"
+    // 更新地址
+    url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manhuaren.js"
 
+    // 站点对无 UA 请求会返回异常页面，统一使用固定 UA
+    static UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-    init() {
+    // 列表页每页条数(夹具 manhua_list.html 内联 var pagesize = "21")
+    static LIST_PAGE_SIZE = 21
 
-    }
+    // 详情评论接口一次可取回全部评论(夹具使用 pagesize=767)
+    static DETAIL_COMMENT_PAGE_SIZE = 767
+
+    // 章节评论接口每页条数(夹具使用 pagesize=20)
+    static CHAPTER_COMMENT_PAGE_SIZE = 20
+
+    // 排行榜子榜顺序与 /manhua-rank/ 页内 rankList_1..4 一致
+    static RANK_NAMES = ["人气榜", "新番榜", "收藏榜", "吐槽榜"]
+
+    // 章节链接形态 /m{cid}/
+    static CHAPTER_PATH = /^\/m(\d+)\/?$/i
+
+    // 漫画链接形态 /manhua-{slug}/(尾斜杠在部分内联链接里可省略)
+    static COMIC_PATH = /^\/?(manhua-[^/?#]+)\/?/i
+
+    // 站内非漫画的 /manhua-<slug>/ 页面(分类列表、排行榜)
+    static NON_COMIC_SLUG = /^manhua-(?:list|rank)(?:-|$)/i
+
+    // 图片扩展名(用于从解包脚本中过滤出图片直链)
+    static IMAGE_URL = /\.(?:jpg|jpeg|png|webp|gif|bmp)(?:\?|$)/i
 
     get baseUrl() {
-        return "https://www.manhuaren.com";
+        return "https://www.manhuaren.com"
     }
 
-    // helper to build common request headers
-    _buildHeaders() {
+    init() {
+        // 站点无需登录、没有可缓存的域名列表，无需初始化任何数据
+    }
+
+    // ============================== 请求与工具 ==============================
+
+    // 统一请求头，referer 为空时不发送 Referer
+    _headers(referer) {
+        let headers = {
+            "User-Agent": ManHuaRen.UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+            "Cache-Control": "no-cache",
+        }
+        if (referer) headers["Referer"] = referer
+        return headers
+    }
+
+    // 图片请求头: 图床校验 Referer 与 UA
+    _imageHeaders(referer) {
         return {
-            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36',
-            'accept': '*/*',
-            'accept-encoding': 'gzip, deflate, br, zstd',
-            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'cache-control': 'no-cache',
-            'pragma': 'no-cache',
-            'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-            'sec-ch-ua-mobile': '?1',
-            'sec-ch-ua-platform': '"Android"',
-            'host': 'www.manhuaren.com'
+            "User-Agent": ManHuaRen.UA,
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+            "Referer": referer || (this.baseUrl + "/"),
         }
     }
 
-
-    _buildImageHeaders(imageUrl, referer) {
-        let host = '';
+    /**
+     * 统一 GET 请求入口，失败时抛出带 URL/状态码的可诊断错误。
+     * @returns {Promise<string>} 响应正文
+     */
+    async _fetch(url, referer) {
+        let res
         try {
-            let u = new URL(imageUrl);
-            host = u.host;
+            res = await Network.get(url, this._headers(referer))
         } catch (e) {
-            // fallback: try to extract host from string
-            let m = imageUrl.match(/^https?:\/\/([^\/]+)/i);
-            host = m ? m[1] : '';
+            throw new Error(`请求异常: ${url} -> ${(e && e.message) ? e.message : String(e)}`)
+        }
+        if (!res || typeof res.status !== "number") {
+            throw new Error(`请求无响应: ${url}`)
+        }
+        if (res.status !== 200) {
+            throw new Error(`请求失败 HTTP ${res.status}: ${url}`)
+        }
+        if (!res.body) {
+            throw new Error(`响应正文为空(可能被风控或需要登录): ${url}`)
+        }
+        return res.body
+    }
+
+    // 相对路径/协议相对地址 -> 绝对地址
+    _abs(path) {
+        let u = String(path === undefined || path === null ? "" : path).trim()
+        if (!u) return ""
+        if (/^https?:\/\//i.test(u)) return u
+        if (u.startsWith("//")) return "https:" + u
+        if (u.startsWith("/")) return this.baseUrl + u
+        return this.baseUrl + "/" + u
+    }
+
+    // 漫画 id -> 详情页绝对 URL(id 可以是绝对 URL、/manhua-<slug>/ 或裸 slug)
+    _comicUrl(id) {
+        let u = String(id === undefined || id === null ? "" : id).trim()
+        if (!u) throw new Error("漫画 id 为空")
+        if (/^https?:\/\//i.test(u)) return u
+        if (u.startsWith("//")) return "https:" + u
+        if (u.startsWith("/")) return this.baseUrl + u
+        let parsed = this._comicId(u)
+        if (parsed) return parsed
+        return this.baseUrl + "/" + u.replace(/^\/+/, "").replace(/\/+$/, "") + "/"
+    }
+
+    // 封面/头像/图片地址归一化为 https 绝对地址
+    _normImage(url) {
+        let u = String(url === undefined || url === null ? "" : url).trim()
+        if (!u) return ""
+        if (u.startsWith("//")) return "https:" + u
+        if (/^https?:\/\//i.test(u)) return u.replace(/^http:\/\//i, "https://")
+        if (u.startsWith("/")) return this.baseUrl + u
+        return this.baseUrl + "/" + u
+    }
+
+    // 文本清洗: 合并空白
+    _clean(text) {
+        let s = String(text === undefined || text === null ? "" : text)
+        return s.replace(/\s+/g, " ").trim()
+    }
+
+    // 元素文本(不存在返回空串)
+    _text(el) {
+        return el ? this._clean(el.text) : ""
+    }
+
+    // 元素属性(不存在返回空串)
+    _attr(el, name) {
+        if (!el || !el.attributes) return ""
+        let v = el.attributes[name]
+        return v === undefined || v === null ? "" : String(v)
+    }
+
+    // 从 /manhua-{slug}/ 形式链接解析出统一漫画 id(绝对 URL, 去掉查询参数)
+    _comicId(href) {
+        if (!href) return null
+        let u = String(href).trim().replace(/^https?:\/\/[^/]+/i, "")
+        let m = u.match(ManHuaRen.COMIC_PATH)
+        if (!m) return null
+        // 排除 /manhua-list/、/manhua-rank/ 等非漫画页面
+        if (ManHuaRen.NON_COMIC_SLUG.test(m[1])) return null
+        return this.baseUrl + "/" + m[1] + "/"
+    }
+
+    // 从 /m{cid}/ 形式链接解析出章节 key(/m{cid}/)
+    _chapterKey(href) {
+        if (!href) return null
+        let u = String(href).trim()
+        if (/^https?:\/\//i.test(u)) u = u.replace(/^https?:\/\/[^/]+/i, "")
+        let m = u.match(ManHuaRen.CHAPTER_PATH)
+        return m ? `/m${m[1]}/` : null
+    }
+
+    // 从任意字符串(章节 id/纯数字)解析出章节数字 cid
+    _chapterDigits(value) {
+        if (!value) return null
+        let m = String(value).match(/\/m(\d+)\b/) || String(value).match(/^(\d+)$/) || String(value).match(/(\d{3,})/)
+        return m ? m[1] : null
+    }
+
+    // 从章节 id/URL 严格解析 cid（只接受 /m<cid>/、m<cid>、纯数字）
+    _chapterCid(value) {
+        let s = String(value === undefined || value === null ? "" : value).trim()
+        let m = s.match(/\/m(\d+)\/?(?:[?#].*)?$/i) || s.match(/^m(\d+)$/i) || s.match(/^(\d+)$/)
+        return m ? m[1] : null
+    }
+
+    // 章节 id/URL 归一化为标准章节页 URL（/m{cid}/）
+    _chapterUrl(value) {
+        let cid = this._chapterCid(value)
+        if (cid) return `${this.baseUrl}/m${cid}/`
+        return this._abs(value)
+    }
+
+    // ============================== HTML 片段解析 ==============================
+
+    // 解析 manga-list 卡片(列表页/首页/推荐位共用)
+    _parseMangaCard(item) {
+        let coverA = item.querySelector(".manga-list-2-cover a") || item.querySelector("a")
+        let id = this._comicId(this._attr(coverA, "href"))
+        if (!id) return null
+
+        let img = item.querySelector(".manga-list-2-cover-img") || item.querySelector("img")
+        let titleEl = item.querySelector(".manga-list-2-title") || item.querySelector(".manga-list-1-title")
+        let title = this._text(titleEl)
+        if (!title) title = this._clean(this._attr(coverA, "title"))
+        if (!title) return null
+
+        let tipEl = item.querySelector(".manga-list-2-tip") || item.querySelector(".manga-list-1-tip")
+        let badgeEl = item.querySelector(".manga-list-2-cover-logo-font") || item.querySelector(".manga-list-1-cover-logo-font")
+        let badge = this._text(badgeEl)
+
+        return new Comic({
+            id: id,
+            title: title,
+            subTitle: this._text(tipEl),
+            cover: this._normImage(this._attr(img, "data-src") || this._attr(img, "src")),
+            tags: badge ? [badge] : [],
+        })
+    }
+
+    // 解析容器内所有漫画卡片(root 可以是 HtmlDocument 或 .manga-list 元素)
+    _parseMangaCards(root) {
+        let comics = []
+        let seen = {}
+        for (let item of root.querySelectorAll("li")) {
+            let c = null
+            try {
+                c = this._parseMangaCard(item)
+            } catch (e) {
+                // 单个卡片结构异常(站点畸形 HTML)时跳过该条目, 不影响整页解析
+                c = null
+            }
+            if (!c || seen[c.id]) continue
+            seen[c.id] = true
+            comics.push(c)
+        }
+        return comics
+    }
+
+    // 解析页面中的 .manga-list 版块(首页聚合 / 详情页推荐位)
+    _parseMangaSections(doc) {
+        let sections = []
+        for (let box of doc.querySelectorAll(".manga-list")) {
+            let titleEl = box.querySelector(".manga-list-title")
+            let title = this._text(titleEl).replace(/更多\s*$/, "").trim()
+            let comics = this._parseMangaCards(box)
+            if (comics.length === 0) continue
+            sections.push({
+                title: title || "漫画列表",
+                comics: comics,
+                moreHref: this._attr(titleEl ? titleEl.querySelector("a") : null, "href"),
+            })
+        }
+        return sections
+    }
+
+    // 解析排行榜页: 每个 ul.rank-list 一个子榜
+    _parseRankSections(doc) {
+        let names = []
+        for (let el of doc.querySelectorAll(".rank-selector-item")) {
+            let n = this._text(el)
+            names.push(n)
+        }
+        let lists = doc.querySelectorAll("ul.rank-list")
+        let sections = []
+        for (let i = 0; i < lists.length; i++) {
+            let title = names[i] || ManHuaRen.RANK_NAMES[i] || `排行榜${i + 1}`
+            let comics = []
+            let seen = {}
+            for (let a of lists[i].querySelectorAll("a")) {
+                let id = this._comicId(this._attr(a, "href"))
+                if (!id || seen[id]) continue
+                let titleEl = a.querySelector(".rank-list-info-right-title")
+                let subEl = a.querySelector(".rank-list-info-right-subtitle")
+                let img = a.querySelector(".rank-list-cover-img")
+                let indexEl = a.querySelector(".rank-list-info-left-index")
+                let rankTitle = this._text(titleEl) || this._clean(this._attr(a, "title"))
+                if (!rankTitle) continue
+                let rank = this._text(indexEl)
+                seen[id] = true
+                comics.push(new Comic({
+                    id: id,
+                    title: rankTitle,
+                    subTitle: this._text(subEl),
+                    cover: this._normImage(this._attr(img, "src")),
+                    tags: rank ? [`No.${rank}`] : [],
+                }))
+            }
+            if (comics.length > 0) {
+                sections.push({ title: title, comics: comics })
+            }
+        }
+        return sections
+    }
+
+    // 解析搜索页
+    _parseSearchResults(doc) {
+        let comics = []
+        for (let item of doc.querySelectorAll("ul.book-list > li")) {
+            let linkA = item.querySelector(".book-list-cover a")
+            let id = this._comicId(this._attr(linkA, "href"))
+            if (!id) continue
+
+            let titleEl = item.querySelector(".book-list-info-title")
+            let title = this._text(titleEl)
+            if (!title) title = this._clean(this._attr(linkA, "title"))
+            if (!title) continue
+
+            let img = item.querySelector(".book-list-cover-img")
+            let cover = this._normImage(this._attr(img, "data-src") || this._attr(img, "src"))
+
+            let tags = []
+            for (let t of item.querySelectorAll(".book-list-info-bottom-item")) {
+                let v = this._text(t)
+                if (v) tags.push(v)
+            }
+            let status = this._text(item.querySelector(".book-list-info-bottom-right-font"))
+            if (status) tags.push(status)
+
+            comics.push(new Comic({
+                id: id,
+                title: title,
+                cover: cover,
+                description: this._text(item.querySelector(".book-list-info-desc")),
+                tags: tags,
+            }))
+        }
+        return comics
+    }
+
+    /**
+     * 解析详情页章节列表。
+     * 移动版详情页把章节放在 .detail-list 内，章节链接形如 /m{cid}/；
+     * 部分页面只保留内层 .detail-list-2，故做一次容器兜底。
+     */
+    _parseChapters(doc) {
+        let chapters = new Map()
+        // 在线页为 ul.detail-list-1.detail-list-select；兼容旧主题 .detail-list / .detail-list-2
+        let boxes = doc.querySelectorAll(".detail-list-1, .detail-list, .detail-list-2")
+        for (let box of boxes) {
+            for (let a of box.querySelectorAll("a")) {
+                let key = this._chapterKey(this._attr(a, "href"))
+                if (!key || chapters.has(key)) continue
+                let title = this._clean(this._attr(a, "title")) || this._text(a)
+                chapters.set(key, title || key)
+            }
+        }
+        return chapters
+    }
+
+    // ============================== 章节图片解析 ==============================
+
+    // 取出页面中用于保护图片地址的 packer 脚本
+    _packedScript(html) {
+        let doc = new HtmlDocument(html)
+        try {
+            for (let s of doc.querySelectorAll("script")) {
+                let code = s.innerHTML || ""
+                if (code.indexOf("eval(function(p,a,c,k,e,d)") >= 0) return code
+            }
+        } finally {
+            doc.dispose()
+        }
+        return null
+    }
+
+    /**
+     * 解包 Dean Edwards packer (eval(function(p,a,c,k,e,d){...}('...',a,c,'k'.split('|'),0,{})))。
+     * 返回还原后的脚本字符串，无法识别时返回 null。
+     */
+    _unpackPacker(code) {
+        let m = String(code).match(/eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/)
+        if (!m) return null
+
+        let payload = m[1]
+        let base = parseInt(m[2], 10)
+        let count = parseInt(m[3], 10)
+        let dict = m[4].split("|")
+        if (!base || !count || isNaN(base) || isNaN(count)) return null
+
+        // packer 的整数 -> 单词编码
+        let encode = (n) => (n < base ? "" : encode(parseInt(n / base))) +
+            ((n = n % base) > 35 ? String.fromCharCode(n + 29) : n.toString(36))
+
+        let map = {}
+        while (count--) {
+            let token = encode(count)
+            map[token] = dict[count] || token
+        }
+        return payload.replace(/\b\w+\b/g, (w) => (map[w] !== undefined ? map[w] : w))
+    }
+
+    // 从章节页 HTML 中解析图片地址(解包 newImgs 数组)
+    _parseChapterImages(html) {
+        let code = this._packedScript(html)
+        if (!code) return []
+        let decoded = this._unpackPacker(code)
+        if (!decoded) return []
+
+        let urls = decoded.match(/https?:\/\/[^\s'"\\,]+/g) || []
+        let images = []
+        let seen = {}
+        for (let u of urls) {
+            if (!ManHuaRen.IMAGE_URL.test(u)) continue
+            if (seen[u]) continue
+            seen[u] = true
+            images.push(u)
+        }
+        return images
+    }
+
+    // ============================== 评论解析 ==============================
+
+    // 单条评论 -> Comment
+    _toComment(item, page) {
+        let replies = Array.isArray(item.ToPostShowDataItems) ? item.ToPostShowDataItems : null
+        return new Comment({
+            id: `${item.Id}//${page}`,
+            userName: this._clean(item.Poster),
+            avatar: this._normImage(item.HeadUrl),
+            content: String(item.PostContent === undefined || item.PostContent === null ? "" : item.PostContent),
+            time: this._clean(item.PostTime),
+            replyCount: replies ? replies.length : 0,
+            isLiked: !!item.IsPraise,
+        })
+    }
+
+    /**
+     * 解析评论接口返回的 JSON 数组。
+     * @param body {string}
+     * @param page {number} 请求页码(用于生成可回传的评论 id)
+     * @param pageSize {number} 该接口的每页条数(用于推断是否还有下一页)
+     * @param replyTo {string?} 形如 "评论id//页码"
+     */
+    _parseComments(body, page, pageSize, replyTo) {
+        let data
+        try {
+            data = JSON.parse(body)
+        } catch (e) {
+            let head = String(body).slice(0, 120)
+            throw new Error(`评论接口返回非 JSON 数据: ${head}`)
+        }
+        if (!Array.isArray(data)) return { comments: [], maxPage: page }
+
+        if (replyTo) {
+            let targetId = String(replyTo).split("//")[0]
+            let parent = null
+            for (let item of data) {
+                if (String(item.Id) === targetId) {
+                    parent = item
+                    break
+                }
+            }
+            if (!parent || !Array.isArray(parent.ToPostShowDataItems)) {
+                return { comments: [], maxPage: 1 }
+            }
+            return {
+                comments: parent.ToPostShowDataItems.map((item) => this._toComment(item, page)),
+                maxPage: 1,
+            }
         }
 
+        let comments = data.map((item) => this._toComment(item, page))
+        // 一页取回的条数不足页大小时说明已经到底
         return {
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            //'Host': host || '',
-            'Pragma': 'no-cache',
-            'Referer': referer || (this.baseUrl + '/'),
-            'Sec-Fetch-Dest': 'image',
-            'Sec-Fetch-Mode': 'no-cors',
-            'Sec-Fetch-Site': 'cross-site',
-            'Sec-Fetch-Storage-Access': 'active',
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36',
-            'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-            'sec-ch-ua-mobile': '?1',
-            'sec-ch-ua-platform': '"Android"'
+            comments: comments,
+            maxPage: comments.length >= pageSize ? page + 1 : page,
         }
     }
 
-    // explore page list
+    // 评论请求参数中的页码为 0 基(夹具请求 pageindex=0 对应第 1 页)
+    _commentRequestPage(page, replyTo) {
+        let p = Math.max(1, parseInt(page, 10) || 1)
+        if (replyTo) {
+            let parts = String(replyTo).split("//")
+            let rp = parseInt(parts[1], 10)
+            if (!isNaN(rp) && rp > 0) p = rp
+        }
+        return p
+    }
+
+    // ============================== 首页聚合 ==============================
+
     explore = [
         {
             title: "漫画人",
             type: "multiPartPage",
             load: async (page) => {
-                let url = this.baseUrl + '/';
-                let res = await Network.get(
-                    url,
-                    this._buildHeaders()
-                );
+                let parts = []
+                let errors = []
 
-                if (res.status !== 200) {
-                    throw `Invalid status code: ${res.status}`
+                // 1) 首页: 移动版首页的 .manga-list 版块(桌面版首页是 APP 下载页，没有漫画版块)
+                try {
+                    let html = await this._fetch(this.baseUrl + "/", this.baseUrl + "/")
+                    let doc = new HtmlDocument(html)
+                    try {
+                        for (let sec of this._parseMangaSections(doc)) {
+                            let part = { title: sec.title, comics: sec.comics }
+                            let target = this._viewMoreTarget(sec.title, sec.moreHref)
+                            if (target) part.viewMore = target
+                            parts.push(part)
+                        }
+                    } finally {
+                        doc.dispose()
+                    }
+                } catch (e) {
+                    errors.push(`首页: ${e && e.message ? e.message : String(e)}`)
                 }
 
-                let html = res.body || '';
-                let doc = new HtmlDocument(html);
-                let parts = [];
-
-                // Banner
-                let banner = doc.querySelector('.index-banner');
-                if (banner) {
-                    let comics = [];
-                    let items = banner.querySelectorAll('li');
-                    for (let i = 0; i < items.length; i++) {
-                        let item = items[i];
-                        let a = item.querySelector('a');
-                        if (!a) continue;
-                        let img = item.querySelector('img');
-                        
-                        let href = a.attributes['href'];
-                        let title = a.attributes['title'];
-                        let cover = img ? (img.attributes['src'] || img.attributes['data-src']) : '';
-                        
-                        if (href) {
-                            if (!href.startsWith('http')) href = this.baseUrl + href;
-                            if (cover && !cover.startsWith('http')) {
-                                if (cover.startsWith('//')) cover = 'https:' + cover;
-                                else cover = this.baseUrl + cover;
-                            }
-                            comics.push(new Comic({
-                                id: href,
-                                title: title || '',
-                                cover: cover || '',
-                                description: ''
-                            }));
+                // 2) 排行榜: /manhua-rank/ 的 4 个子榜
+                try {
+                    let html = await this._fetch(this.baseUrl + "/manhua-rank/", this.baseUrl + "/manhua-rank/")
+                    let doc = new HtmlDocument(html)
+                    try {
+                        let sections = this._parseRankSections(doc)
+                        for (let i = 0; i < sections.length; i++) {
+                            parts.push({
+                                title: sections[i].title,
+                                comics: sections[i].comics,
+                                viewMore: {
+                                    page: "category",
+                                    attributes: { category: sections[i].title, param: `rank${i + 1}` },
+                                },
+                            })
                         }
+                    } finally {
+                        doc.dispose()
                     }
-                    if (comics.length > 0) {
-                        parts.push({ title: '热门推荐', comics: comics });
-                    }
+                } catch (e) {
+                    errors.push(`排行榜: ${e && e.message ? e.message : String(e)}`)
                 }
 
-                // Lists
-                let lists = doc.querySelectorAll('.manga-list');
-                for (let i = 0; i < lists.length; i++) {
-                    let list = lists[i];
-                    let titleNode = list.querySelector('.manga-list-title');
-                    let title = titleNode ? titleNode.text.trim() : '';
-                    
-                    let viewMore = null;
-                    if (titleNode) {
-                        let moreNode = titleNode.querySelector('a');
-                        if (moreNode) {
-                            let href = moreNode.attributes['href'];
-                            if (href) {
-                                if (!href.startsWith('http')) href = this.baseUrl + href;
-                                viewMore = href;
-                            }
+                // 3) 分类列表首页(最热门)
+                try {
+                    let html = await this._fetch(this.baseUrl + "/manhua-list/", this.baseUrl + "/manhua-list/")
+                    let doc = new HtmlDocument(html)
+                    try {
+                        let comics = this._parseMangaCards(doc)
+                        if (comics.length > 0) {
+                            parts.push({
+                                title: "最热门",
+                                comics: comics,
+                                viewMore: {
+                                    page: "category",
+                                    attributes: { category: "最热门", param: "/manhua-list/" },
+                                },
+                            })
                         }
+                    } finally {
+                        doc.dispose()
                     }
-
-                    let comics = [];
-                    let items = list.querySelectorAll('li');
-                    for (let j = 0; j < items.length; j++) {
-                        let item = items[j];
-                        let a = item.querySelector('a');
-                        if (!a) continue;
-                        
-                        let href = a.attributes['href'];
-                        let comicTitle = a.attributes['title'];
-                        
-                        if (!comicTitle) {
-                            let t = item.querySelector('.manga-list-2-title');
-                            if (t) comicTitle = t.text.trim();
-                        }
-                        
-                        let img = item.querySelector('img');
-                        let cover = img ? (img.attributes['data-src'] || img.attributes['src']) : '';
-                        
-                        let tip = item.querySelector('.manga-list-1-tip') || item.querySelector('.manga-list-2-tip');
-                        let desc = tip ? tip.text.trim() : '';
-                        
-                        let badgeNode = item.querySelector('.manga-list-1-cover-logo-font');
-                        let badge = badgeNode ? badgeNode.text.trim() : '';
-
-                        if (href) {
-                            if (!href.startsWith('http')) href = this.baseUrl + href;
-                            if (cover && !cover.startsWith('http')) {
-                                if (cover.startsWith('//')) cover = 'https:' + cover;
-                                else cover = this.baseUrl + cover;
-                            }
-                            
-                            comics.push(new Comic({
-                                id: href,
-                                title: comicTitle || '',
-                                cover: cover || '',
-                                description: desc,
-                                tags: badge ? [badge] : []
-                            }));
-                        }
-                    }
-
-                    if (comics.length > 0) {
-                        if (!title) {
-                            if (comics[0].tags && comics[0].tags.length > 0) {
-                                title = comics[0].tags[0];
-                            } else {
-                                title = '漫画列表';
-                            }
-                        }
-                        let part = { title: title, comics: comics };
-                        if (viewMore) part.viewMore = viewMore;
-                        parts.push(part);
-                    }
+                } catch (e) {
+                    errors.push(`分类列表: ${e && e.message ? e.message : String(e)}`)
                 }
 
-                return parts;
+                if (parts.length === 0) {
+                    throw new Error(`漫画人首页聚合失败: ${errors.join(" | ")}`)
+                }
+                return parts
             },
-            loadNext(next) { }
-        }
+            loadNext(next) { },
+        },
     ]
 
-    // categories
+    // 首页版块"更多"链接 -> 分类跳转目标(PAGE 跳转必须用 PageJumpTarget 对象)
+    _viewMoreTarget(title, href) {
+        let path = String(href || "").trim()
+        if (/^\/manhua-list(-s\d+|-st\d+)?\/$/.test(path)) {
+            return { page: "category", attributes: { category: title, param: path } }
+        }
+        if (/^\/manhua-rank\/?$/.test(path)) {
+            return { page: "category", attributes: { category: "人气榜", param: "rank1" } }
+        }
+        return null
+    }
+
+    // ============================== 分类 ==============================
+
     category = {
-        /// title of the category page, used to identify the page, it should be unique
         title: "漫画人",
         parts: [
             {
-                // title of the part
-                name: "类型",
-
-                // fixed list of categories
+                name: "分类",
                 type: "fixed",
                 itemType: "category",
-
-                // human readable categories and params mapped in categoryParams
-                categories: [
-                    "全部",
-                    "热血",
-                    "恋爱",
-                    "校园",
-                    "伪娘",
-                    "冒险",
-                    "职场",
-                    "后宫",
-                    "治愈",
-                    "科幻",
-                    "轻小说",
-                    "励志",
-                    "生活",
-                    "战争",
-                    "悬疑",
-                    "推理",
-                    "搞笑",
-                    "奇幻",
-                    "魔法",
-                    "神鬼",
-                    "萌系",
-                    "历史",
-                    "美食",
-                    "同人",
-                    "运动",
-                    "绅士",
-                    "机甲",
-                    "百合",
-                ],
-                // corresponding params (tag ids). Keep order aligned with `categories` above.
+                categories: ["最热门", "最近更新", "最新上架", "已完结", "连载中"],
+                // 参数取自夹具 manhua_list.html 顶部 manga-list-bar 的站点自有链接
                 categoryParams: [
-                    "",     // 全部
-                    "31",   // 热血
-                    "26",   // 恋爱
-                    "1",    // 校园
-                    "5",    // 伪娘
-                    "2",    // 冒险
-                    "6",    // 职场
-                    "8",    // 后宫
-                    "9",    // 治愈
-                    "25",   // 科幻
-                    "156",  // 轻小说
-                    "10",   // 励志
-                    "11",   // 生活
-                    "12",   // 战争
-                    "17",   // 悬疑
-                    "33",   // 推理
-                    "37",   // 搞笑
-                    "14",   // 奇幻
-                    "15",   // 魔法
-                    "20",   // 神鬼
-                    "21",   // 萌系
-                    "4",    // 历史
-                    "7",    // 美食
-                    "30",   // 同人
-                    "34",   // 运动
-                    "36",   // 绅士
-                    "40",   // 机甲
-                    "3",    // 百合
+                    "/manhua-list/",
+                    "/manhua-list-s2/",
+                    "/manhua-list-s18/",
+                    "/manhua-list-st2/",
+                    "/manhua-list-st1/",
                 ],
-            }
+            },
+            {
+                name: "排行榜",
+                type: "fixed",
+                itemType: "category",
+                categories: ["人气榜", "新番榜", "收藏榜", "吐槽榜"],
+                // rank1..4 对应 /manhua-rank/ 页内 rankList_1..4
+                categoryParams: ["rank1", "rank2", "rank3", "rank4"],
+            },
         ],
-        // enable ranking page
         enableRankingPage: false,
     }
 
     categoryComics = {
         load: async (category, param, options, page) => {
-            // param is expected to be the tag id (e.g. "31").
-            let tag = param || '';
+            let pageNum = Math.max(1, parseInt(page, 10) || 1)
+            let key = String(param === undefined || param === null ? "" : param).trim()
+            if (!key) key = "/manhua-list/"
 
-            // options: [statusOption, sortOption]
-            // option values use left side before '-' (e.g. 'st1-连载' -> 'st1')
-            let statusOpt = (options && options[0]) ? options[0].split('-')[0] : '';
-            let sortOpt = (options && options[1]) ? options[1].split('-')[0] : '';
-
-            // Build path like: manhua-list(-tag{tag})?(-{status})?(-{sort})?/dm5.ashx
-            let path = 'manhua-list';
-            if (tag) path += `-tag${tag}`;
-            if (statusOpt) path += `-${statusOpt}`;
-            if (sortOpt) path += `-${sortOpt}`;
-
-            let url = `${this.baseUrl}/${path}/dm5.ashx`;
-                // POST body: use site form-data fields
-                // action=getclasscomics&pageindex=3&pagesize=21&categoryid=0&tagid=0&status=1&usergroup=0&pay=-1&areaid=0&sort=2&iscopyright=0
-                let pageIndex = Math.max(0, (parseInt(page) || 1));
-                let pageSize = 21;
-                // map status option like 'st1' -> 1, 'st2' -> 2
-                let statusNum = 0;
-                if (statusOpt && statusOpt.startsWith('st')) {
-                    let m = statusOpt.match(/st(\d+)/);
-                    if (m) statusNum = parseInt(m[1]);
+            // 排行榜子榜: 解析 /manhua-rank/ 页面 HTML
+            let rankMatch = key.match(/^rank([1-9]\d*)$/)
+            if (rankMatch) {
+                let index = parseInt(rankMatch[1], 10) - 1
+                let url = this.baseUrl + "/manhua-rank/"
+                let html = await this._fetch(url, url)
+                let doc = new HtmlDocument(html)
+                try {
+                    let sections = this._parseRankSections(doc)
+                    let section = sections[index]
+                    if (!section) {
+                        throw new Error(`排行榜 ${key} 解析失败(页面内没有对应的 ul.rank-list): ${url}`)
+                    }
+                    return { comics: section.comics, maxPage: 1 }
+                } finally {
+                    doc.dispose()
                 }
-                // map sort option like 's2' -> 2, 's18' -> 18
-                let sortNum = 0;
-                if (sortOpt && sortOpt.startsWith('s')) {
-                    let m = sortOpt.match(/s(\d+)/);
-                    if (m) sortNum = parseInt(m[1]);
-                }
-                // tag id (tag param) - if empty use 0
-                let tagId = tag && tag.length > 0 ? tag : '0';
-
-                let body = `action=getclasscomics&pageindex=${pageIndex}&pagesize=${pageSize}&categoryid=0&tagid=${encodeURIComponent(tagId)}&status=${statusNum}&usergroup=0&pay=-1&areaid=0&sort=${sortNum}&iscopyright=0`;
-
-            // 使用站点期望的 AJAX 请求头（不包含 cookie）
-            let categoryHeaders = {
-                'accept': 'application/json, text/javascript, */*; q=0.01',
-                'accept-encoding': 'gzip, deflate, br, zstd',
-                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'cache-control': 'no-cache',
-                'connection': 'keep-alive',
-                'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'host': 'www.manhuaren.com',
-                'origin': this.baseUrl,
-                'pragma': 'no-cache',
-                'referer': `${this.baseUrl}/${path}/`,
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-origin',
-                'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-                'x-requested-with': 'XMLHttpRequest'
-            };
-
-            let res = await Network.post(url, categoryHeaders, body);
-            if (res.status !== 200) {
-                throw `加载分类漫画失败: ${res.status}`;
             }
 
-            let data = {};
+            // 分类列表页: 路径必须来自站点自有链接
+            if (!/^\/manhua-list(-s\d+|-st\d+)?\/$/.test(key)) {
+                throw new Error(`未知的分类参数: ${key}`)
+            }
+
+            // 站点列表页没有 HTML 分页，下一页依赖 dm5.ashx 匿名 POST(返回 0 字节)，故只提供第一页
+            if (pageNum > 1) {
+                return { comics: [], maxPage: pageNum }
+            }
+
+            let url = this.baseUrl + key
+            let html = await this._fetch(url, url)
+            let doc = new HtmlDocument(html)
             try {
-                data = JSON.parse(res.body || '{}');
-            } catch (e) {
-                throw '解析分类返回数据失败';
+                let comics = this._parseMangaCards(doc)
+                if (comics.length === 0) {
+                    throw new Error(`分类页没有解析到漫画条目: ${url}`)
+                }
+                return { comics: comics, maxPage: 1 }
+            } finally {
+                doc.dispose()
             }
-
-            let items = data.UpdateComicItems || [];
-            let comics = items.map(it => {
-                // UrlKey already contains path like "manhua-xxxx"
-                let id = it.UrlKey ? `/${it.UrlKey}/` : (it.ID ? `/m${it.ID}/` : '');
-                let cover = it.ShowPicUrlB || it.ShowConver || '';
-                if (cover && cover.startsWith('//')) cover = 'https:' + cover;
-                if (cover && !cover.startsWith('http')) cover = this.baseUrl + cover;
-
-                let tags = [];
-                if (it.Author && Array.isArray(it.Author)) tags = it.Author.slice(0,3);
-
-                return new Comic({
-                    id: id,
-                    title: it.Title,
-                    cover: cover,
-                    description: it.Content || '',
-                    tags: tags
-                });
-            });
-
-            let perPage = items.length || 20;
-            let total = data.Count || 0;
-            let maxPage = perPage > 0 ? Math.max(1, Math.ceil(total / perPage)) : (comics.length > 0 ? page + 1 : page);
-
-            return {
-                comics: comics,
-                maxPage: maxPage+1
-            };
         },
-
-        // provide options for category comic loading: status and sort
-        optionList: [
-            {
-                type: 'select',
-                label: '状态',
-                options: [
-                    'st0-全部',
-                    'st1-连载',
-                    'st2-已完结'
-                ],
-                default: 'st0'
-            },
-            {
-                type: 'select',
-                label: '排序',
-                options: [
-                    's2-最近更新',
-                    's10-人气最旺',
-                    's18-最近上架'
-                ],
-                default: 's2'
-            }
-        ],
     }
 
-    /// search related
+    // ============================== 搜索 ==============================
+
     search = {
-        /**
-         * load search result
-         * @param keyword {string}
-         * @param options {string[]} - options from optionList
-         * @param page {number}
-         * @returns {Promise<{comics: Comic[], maxPage: number}>}
-         */
         load: async (keyword, options, page) => {
-            let url = `${this.baseUrl}/search?title=${encodeURIComponent(keyword)}&language=1&page=${page}`;
-            
-            let res = await Network.get(url, this._buildHeaders());
-            if (res.status !== 200) {
-                throw `Search failed: ${res.status}`;
+            let kw = this._clean(keyword)
+            let pageNum = Math.max(1, parseInt(page, 10) || 1)
+            if (!kw) return { comics: [], maxPage: 1 }
+
+            let url = `${this.baseUrl}/search?title=${encodeURIComponent(kw)}&language=1&page=${pageNum}`
+            let html = await this._fetch(url, this.baseUrl + "/")
+            let doc = new HtmlDocument(html)
+            let comics = []
+            try {
+                comics = this._parseSearchResults(doc)
+            } finally {
+                doc.dispose()
             }
 
-            let doc = new HtmlDocument(res.body);
-            let comics = [];
-            let list = doc.querySelectorAll('.book-list > li');
-
-            for (let item of list) {
-                let link = item.querySelector('.book-list-info > a');
-                let href = link?.attributes['href'];
-                if (!href) continue;
-
-                if (!href.startsWith('http')) {
-                    href = this.baseUrl + href;
-                }
-
-                let title = item.querySelector('.book-list-info-title')?.text?.trim();
-                let coverEl = item.querySelector('.book-list-cover-img');
-                let cover = coverEl?.attributes['src'];
-                if (cover) {
-                    if (cover.startsWith('//')) cover = 'https:' + cover;
-                    else if (!cover.startsWith('http')) cover = this.baseUrl + cover;
-                }
-
-                let desc = item.querySelector('.book-list-info-desc')?.text?.trim();
-                
-                let tags = [];
-                let tagEls = item.querySelectorAll('.book-list-info-bottom-item');
-                for (let t of tagEls) {
-                    tags.push(t.text.trim());
-                }
-                
-                let status = item.querySelector('.book-list-info-bottom-right-font')?.text?.trim();
-                if (status) tags.push(status);
-
-                comics.push(new Comic({
-                    id: href,
-                    title: title,
-                    cover: cover,
-                    description: desc,
-                    tags: tags
-                }));
-            }
-
-            let maxPage = comics.length > 0 ? page + 1 : page;
-
-            return {
-                comics: comics,
-                maxPage: maxPage
-            };
+            // 搜索结果页没有总数，按"本页有条目则还有下一页"推进
+            return { comics: comics, maxPage: comics.length > 0 ? pageNum + 1 : pageNum }
         },
 
         optionList: [],
@@ -477,503 +730,233 @@ class ManHuaRen extends ComicSource {
         enableTagsSuggestions: false,
     }
 
-    /// single comic related
+    // ============================== 单个漫画 ==============================
+
     comic = {
         /**
-         * load comic info
-         * @param id {string}
+         * 加载漫画详情
+         * @param id {string} 绝对 URL 或 /manhua-{slug}/
          * @returns {Promise<ComicDetails>}
          */
         loadInfo: async (id) => {
-            if (!id || typeof id !== 'string') {
-                throw "ID不能为空";
-            }
+            let url = this._comicUrl(id)
+            let html = await this._fetch(url, this.baseUrl + "/")
+            let doc = new HtmlDocument(html)
 
-            let targetUrl = id;
-            if (!targetUrl.startsWith('http')) {
-                if (targetUrl.startsWith('/')) targetUrl = this.baseUrl + targetUrl;
-                else targetUrl = this.baseUrl + '/' + targetUrl;
-            }
+            let title = ""
+            let cover = ""
+            let author = ""
+            let status = ""
+            let updateTime = ""
+            let description = ""
+            let tags = []
+            let stars = null
+            let chapters = new Map()
+            let recommend = []
 
-            let res = await Network.get(
-                targetUrl,
-                this._buildHeaders()
-            );
-            if (res.status !== 200) {
-                throw `请求失败，状态码: ${res.status}，URL: ${targetUrl}`;
-            }
-
-            let html = res.body || '';
-            this.comic.id = id;
-
-            let toAbsUrl = (value) => {
-                if (!value) return '';
-                let trimmed = value.trim();
-                if (trimmed.startsWith('http')) return trimmed;
-                if (trimmed.startsWith('//')) return 'https:' + trimmed;
-                if (trimmed.startsWith('/')) return this.baseUrl + trimmed;
-                return this.baseUrl + '/' + trimmed;
-            };
-
-            let doc = new HtmlDocument(html);
-
-            let title = doc.querySelector('p.detail-main-info-title')?.text?.trim()
-                || doc.querySelector('span.normal-top-title')?.text?.trim()
-                || doc.querySelector('title')?.text?.trim()?.replace(/漫画.*$/i, '')
-                || '未知标题';
-
-            let coverEl = doc.querySelector('.detail-main-cover img')
-                || doc.querySelector('.detail-main-cover .cover-img img');
-            let cover = toAbsUrl(coverEl?.attributes?.src || coverEl?.attributes?.['data-src'] || '');
-
-            let authorContainer = doc.querySelector('.detail-main-info-author');
-            let author = '未知作者';
-            if (authorContainer) {
-                let authors = [];
-                let links = authorContainer.querySelectorAll('a') || [];
-                for (let i = 0; i < links.length; i++) {
-                    let text = links[i].text?.trim();
-                    if (text) authors.push(text);
+            try {
+                title = this._text(doc.querySelector(".detail-main-info-title")) ||
+                    this._text(doc.querySelector(".normal-top-title"))
+                if (!title) {
+                    let titleTag = doc.querySelector("title")
+                    title = this._text(titleTag).split("_")[0].replace(/漫画$/, "").trim()
                 }
-                if (authors.length > 0) {
-                    author = authors.join('，');
-                } else {
-                    let raw = authorContainer.text?.replace(/作者[:：]/, '').trim();
-                    if (raw) author = raw;
+
+                let coverImg = doc.querySelector(".detail-main-cover img") || doc.querySelector(".detail-main-bg")
+                cover = this._normImage(this._attr(coverImg, "data-src") || this._attr(coverImg, "src"))
+
+                let authorBox = doc.querySelector(".detail-main-info-author")
+                if (authorBox) {
+                    let names = []
+                    for (let a of authorBox.querySelectorAll("a")) {
+                        let n = this._text(a)
+                        if (n) names.push(n)
+                    }
+                    author = names.length > 0
+                        ? names.join("，")
+                        : this._text(authorBox).replace(/^作者[:：]?/, "").trim()
                 }
-            } else {
-                let metaAuthor = doc.querySelector('meta[name="Author"]')?.attributes?.content;
-                if (metaAuthor) {
-                    author = metaAuthor.includes(':') ? metaAuthor.split(':').pop().trim() : metaAuthor.trim();
+
+                for (let a of doc.querySelectorAll(".detail-main-info-class a")) {
+                    let t = this._text(a)
+                    if (t) tags.push(t)
                 }
-            }
 
-            let status = doc.querySelector('.detail-list-title-1')?.text?.trim() || '未知状态';
+                let starEl = doc.querySelector(".detail-main-info-star")
+                let starMatch = this._attr(starEl, "class").match(/star-(\d+(?:\.\d+)?)/i)
+                if (starMatch) {
+                    let v = parseFloat(starMatch[1])
+                    if (!isNaN(v)) stars = v
+                }
 
-            let descriptionEl = doc.querySelector('.detail-desc');
-            let description = descriptionEl?.text?.trim() || '';
-            if (!description) {
-                description = doc.querySelector('meta[name="Description"]')?.attributes?.content || '';
-            }
+                description = this._text(doc.querySelector(".detail-desc"))
 
-            let tags = [];
-            let tagElements = doc.querySelectorAll('.detail-main-info-class a') || [];
-            for (let i = 0; i < tagElements.length; i++) {
-                let tagText = tagElements[i].text?.trim();
-                if (tagText) tags.push(tagText);
-            }
+                // 连载状态: 移动版详情页写在章节容器标题里，夹具页面已下架章节列表，故用 <title> 兜底
+                status = this._text(doc.querySelector(".detail-list-title-1"))
+                if (!status) {
+                    let titleTag = doc.querySelector("title")
+                    let raw = this._text(titleTag)
+                    if (raw.indexOf("连载中") >= 0) status = "连载中"
+                    else if (raw.indexOf("已完结") >= 0 || raw.indexOf("完结") >= 0) status = "已完结"
+                }
+                updateTime = this._text(doc.querySelector(".detail-list-title-3"))
 
-            let updateTime = doc.querySelector('.detail-list-title-3')?.text?.trim() || '';
+                chapters = this._parseChapters(doc)
 
-            let starValue = null;
-            let starElement = doc.querySelector('.detail-main-info-star');
-            if (starElement && starElement.attributes && starElement.attributes['class']) {
-                let starClass = starElement.attributes['class'];
-                let match = starClass.match(/star-(\d+)/i);
-                if (match && match[1]) {
-                    let num = parseInt(match[1], 10);
-                    if (!isNaN(num)) {
-                        starValue = num;
+                let seen = {}
+                for (let box of doc.querySelectorAll(".manga-list")) {
+                    for (let c of this._parseMangaCards(box)) {
+                        if (seen[c.id] || c.id === url) continue
+                        seen[c.id] = true
+                        recommend.push(c)
                     }
                 }
+            } finally {
+                doc.dispose()
             }
 
-            let chapters = new Map();
-            let selectorItems = doc.querySelectorAll('.detail-selector .detail-selector-item');
-            
-            if (selectorItems.length > 0) {
-                for (let item of selectorItems) {
-                    let groupName = item.text?.trim();
-                    if (!groupName || groupName.includes('评论')) continue;
+            // 评论接口需要详情页内联变量里的 mid
+            let midMatch = html.match(/var\s+DM5_MID\s*=\s*(\d+)/i) || html.match(/var\s+COMIC_MID\s*=\s*(\d+)/i)
+            let mid = midMatch ? midMatch[1] : null
 
-                    let onclick = item.attributes['onclick'];
-                    let listId = null;
-                    if (onclick) {
-                        let match = onclick.match(/titleSelect\(.*?,.*?, *['"](.*?)['"]\)/);
-                        if (match) {
-                            listId = match[1];
-                        }
-                    }
-
-                    if (listId) {
-                        let listEl = doc.getElementById(listId);
-                        if (listEl) {
-                            let groupChapters = new Map();
-                            let links = listEl.querySelectorAll('a.chapteritem');
-                            for (let link of links) {
-                                let href = link.attributes['href'];
-                                let title = link.text?.trim() || link.attributes['title']?.trim();
-                                if (href && title) {
-                                    if (!href.startsWith('http')) href = toAbsUrl(href);
-                                    groupChapters.set(href, title);
-                                }
-                            }
-                            if (groupChapters.size > 0) {
-                                chapters.set(groupName, groupChapters);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (chapters.size === 0) {
-                let groupChapters = new Map();
-                let links = doc.querySelectorAll('a.chapteritem');
-                for (let link of links) {
-                    let href = link.attributes['href'];
-                    let title = link.text?.trim() || link.attributes['title']?.trim();
-                    if (href && title) {
-                        if (!href.startsWith('http')) href = toAbsUrl(href);
-                        groupChapters.set(href, title);
-                    }
-                }
-                if (groupChapters.size > 0) {
-                    chapters.set('连载', groupChapters);
-                }
-            }
-
-            let parseRecommends = (htmlContent) => {
-                let recs = [];
-                let recPattern = /<li[^>]*class=["'][^"']*(?:list-comic|rec|recommend)[^"']*["'][^>]*>[\s\S]*?<a[^>]*href=["']([^"']+)["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["'][^>]*>[^<]*<\/a>[\s\S]*?<a[^>]*>\s*([^<]+)\s*<\/a>/gi;
-                let m;
-                let count = 0;
-                while ((m = recPattern.exec(htmlContent)) !== null && count < 12) {
-                    let url = m[1];
-                    let cover = m[2];
-                    let titleText = (m[3] || '').trim();
-                    if (!url || !titleText) continue;
-                    if (!url.startsWith('http')) url = toAbsUrl(url);
-                    if (cover && !cover.startsWith('http')) cover = toAbsUrl(cover);
-                    recs.push(new Comic({ id: url, title: titleText, cover: cover }));
-                    count++;
-                }
-                return recs;
-            };
-
-            let recommends = parseRecommends(html);
-
-            // 提取 mid
-            let midMatch = html.match(/mid["\s:]*(\d+)/i) || html.match(/var mid = (\d+)/i) || html.match(/mid=(\d+)/i) || html.match(/var DM5_MID = (\d+)/i) || html.match(/var COMIC_MID=(\d+)/i);
-            if (midMatch) {
-                this.comic.mid = parseInt(midMatch[1]);
-            }
+            let tagMap = new Map()
+            if (author) tagMap.set("作者", [author])
+            if (status) tagMap.set("状态", [status])
+            if (tags.length > 0) tagMap.set("标签", tags)
 
             return new ComicDetails({
-                title,
-                cover,
-                description: description || '暂无描述',
-                tags: {
-                    '作者': [author || '未知作者'],
-                    '状态': [status || '未知状态'],
-                    '标签': tags
-                },
+                title: title,
+                cover: cover,
+                description: description,
+                tags: tagMap,
                 chapters: chapters,
-                recommend: recommends,
+                recommend: recommend,
                 updateTime: updateTime,
-                stars: starValue,
-                subId: this.comic.mid ? this.comic.mid.toString() : '73225'
-            });
+                stars: stars,
+                subId: mid,
+                url: url,
+            })
         },
 
         /**
-         * load images of a chapter
+         * 加载章节图片
          * @param comicId {string}
-         * @param epId {string?}
+         * @param epId {string} /m{cid}/ 或绝对 URL
          * @returns {Promise<{images: string[]}>}
          */
         loadEp: async (comicId, epId) => {
-            let url = `${epId}/`;
-            let res = await Network.get(url, this._buildHeaders());
-            if (res.status !== 200) throw new Error('获取章节内容失败: ' + res.status);
-            let html = res.body;
-            let document = new HtmlDocument(html);
-            let scripts = document.querySelectorAll("script");
-            let script = null;
-            for (let s of scripts) {
-                if (s.innerHTML.includes('eval(function(p,a,c,k,e,d)')) {
-                    script = s.innerHTML;
-                    break;
+            let target = epId
+            // 兜底: 空/历史丢失的章节 id 时, 从详情页取页面顺序第一话
+            if (!this._chapterCid(target)) {
+                let detailUrl = this._comicUrl(comicId)
+                let detailHtml = await this._fetch(detailUrl, this.baseUrl + "/")
+                let doc = new HtmlDocument(detailHtml)
+                let chapters
+                try {
+                    chapters = this._parseChapters(doc)
+                } finally {
+                    doc.dispose()
                 }
-            }
-            if (!script) throw ('无法显示付费内容/章节不存在');
-
-            let pStart = script.indexOf("}('") + 3;
-            let boundaryMatch = script.substring(pStart).match(/',(\d+),(\d+),'/);
-            if (!boundaryMatch) throw new Error('无法解析脚本参数边界');
-            
-            let boundaryIndex = boundaryMatch.index + pStart;
-            let rawP = script.substring(pStart, boundaryIndex);
-            let a = parseInt(boundaryMatch[1]);
-            let c = parseInt(boundaryMatch[2]);
-            
-            let kContentStart = boundaryIndex + boundaryMatch[0].length;
-            let kEnd = script.indexOf("'.split", kContentStart);
-            let rawK = script.substring(kContentStart, kEnd);
-            let dict = rawK.split('|');
-
-            let decrypt = (p, a, c, k) => {
-                let e = (c) => (c < a ? '' : e(parseInt(c / a))) + ((c = c % a) > 35 ? String.fromCharCode(c + 29) : c.toString(36));
-                let d = {};
-                while (c--) d[e(c)] = k[c] || e(c);
-                return p.replace(/\b\w+\b/g, w => d[w] || w);
-            };
-
-            let decrypted = decrypt(rawP, a, c, dict);
-
-            let arrayMatch = decrypted.match(/\[(.*?)\]/);
-            if (!arrayMatch) throw new Error('无法从解密后的脚本中提取图片数组');
-            
-            let arrayContent = arrayMatch[1];
-            let images = arrayContent.split(',').map(item => {
-                // 去除引号和反斜杠
-                return item.trim().replace(/^\\?['"]|\\?['"]$/g, '');
-            }).filter(url => url && url.startsWith('http'));
-            
-            return { images };
-        },
-        /**
-         * [Optional] provide configs for an image loading
-         * @param url
-         * @param comicId
-         * @param epId
-         * @returns {ImageLoadingConfig | Promise<ImageLoadingConfig>}
-         */
-        onImageLoad: (url, comicId, epId) => {
-            let referer = '';
-            if (epId && typeof epId === 'string') {
-                if (!epId.startsWith('http')) {
-                    referer = this.baseUrl + epId;
-                } else {
-                    referer = epId;
+                if (chapters.size === 0) {
+                    throw new Error(`章节 id 无效且详情页未解析到章节: comicId=${comicId} epId=${epId}`)
                 }
-            } else {
-                referer = this.baseUrl + '/';
+                target = chapters.keys().next().value
             }
-            
-            return {
-                headers: this._buildImageHeaders(url, referer)
-            };
+            let url = this._chapterUrl(target)
+            if (!url || url === this.baseUrl) {
+                throw new Error(`章节 id 无效: ${epId}`)
+            }
+            let referer = comicId ? this._comicUrl(comicId) : this.baseUrl + "/"
+            let html = await this._fetch(url, referer)
+
+            let images = this._parseChapterImages(html)
+            if (images.length === 0) {
+                throw new Error(`章节图片解析失败(页面无 packer 脚本或为付费/下架章节): ${url}`)
+            }
+            return { images: images }
         },
+
         /**
-         * [Optional] provide configs for a thumbnail loading
+         * 图片请求头: 图床需要 Referer(章节页) 与 UA
          * @param url {string}
-         * @returns {ImageLoadingConfig | Promise<ImageLoadingConfig>}
-         *
-         * `ImageLoadingConfig.modifyImage` and `ImageLoadingConfig.onLoadFailed` will be ignored.
-         * They are not supported for thumbnails.
-         */
-        onThumbnailLoad: (url) => {
-            return {
-                headers: this._buildImageHeaders(url, this.baseUrl + '/')
-            }
-        },
-        /**
-         * [Optional] like or unlike a comic
-         * @param id {string}
-         * @param isLike {boolean} - true for like, false for unlike
-         * @returns {Promise<void>}
-         */
-        likeComic: async (id, isLike) =>  {
-
-        },
-        /**
-         * [Optional] load comments
-         *
-         * Since app version 1.0.6, rich text is supported in comments.
-         * Following html tags are supported: ['a', 'b', 'i', 'u', 's', 'br', 'span', 'img'].
-         * span tag supports style attribute, but only support font-weight, font-style, text-decoration.
-         * All images will be placed at the end of the comment.
-         * Auto link detection is enabled, but only http/https links are supported.
-         * @param comicId {string}
-         * @param subId {string?} - ComicDetails.subId
-         * @param page {number}
-         * @param replyTo {string?} - commentId to reply, not null when reply to a comment
-         * @returns {Promise<{comments: Comment[], maxPage: number?}>}
-         */
-        loadComments: async (comicId, subId, page, replyTo) => {
-            if (!subId) {
-                throw new Error('漫画ID未找到，无法加载评论');
-            }
-
-            let requestPage = page;
-            let targetCommentId = null;
-            if (replyTo) {
-                let parts = replyTo.split('//');
-                targetCommentId = parts[0];
-                requestPage = parseInt(parts[1]);
-            }
-
-            let url = `${this.baseUrl}/manhua-${comicId}/pagerdata.ashx`;
-            let params = {
-                d: Date.now(),
-                pageindex: (requestPage - 1),
-                pagesize: 767,
-                mid: subId,
-                t: 4
-            };
-            let query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
-            url += '?' + query;
-
-            let headers = {
-                'accept': '*/*',
-                'accept-encoding': 'gzip, deflate, br, zstd',
-                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'cache-control': 'no-cache',
-                'connection': 'keep-alive',
-                'host': 'www.manhuaren.com',
-                'pragma': 'no-cache',
-                'referer': `${this.baseUrl}/manhua-${comicId}/`,
-                'sec-ch-ua': '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-                'sec-ch-ua-mobile': '?1',
-                'sec-ch-ua-platform': '"Android"',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-origin',
-                'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36',
-                'x-requested-with': 'XMLHttpRequest'
-            };
-
-            let res = await Network.get(url, headers);
-            if (res.status !== 200) {
-                throw new Error(`加载评论失败，状态码: ${res.status}`);
-            }
-
-            let data = JSON.parse(res.body);
-            let comments = [];
-
-            let maxPage = 0
-            if (replyTo) {
-                let target = data.find(item => item.Id.toString() === targetCommentId);
-                if (target && target.ToPostShowDataItems) {
-                    comments = target.ToPostShowDataItems.map(item => new Comment({
-                        id: item.Id.toString(),
-                        userName: item.Poster,
-                        content: item.PostContent,
-                        time: item.PostTime,
-                        avatar: item.HeadUrl,
-                        likeCount: item.PraiseCount,
-                        isLiked: item.IsPraise,
-                        replyCount: 0
-                    }));
-                }
-            } else {
-                comments = data.map(item => new Comment({
-                    id: `${item.Id}//${page}`,
-                    userName: item.Poster,
-                    content: item.PostContent,
-                    time: item.PostTime,
-                    avatar: item.HeadUrl, 
-                    likeCount: item.PraiseCount,
-                    isLiked: item.IsPraise,
-                    replyCount: item.ToPostShowDataItems ? item.ToPostShowDataItems.length : 0
-                }));
-                if (comments == []){
-                    maxPage = page;
-                }else{
-                    maxPage = null;
-                }
-            }
-
-            return {
-                comments: comments,
-                maxPage: replyTo? 1 : maxPage
-            };
-        },
-
-        /**
-         * load chapter comments
          * @param comicId {string}
          * @param epId {string}
+         * @returns {ImageLoadingConfig}
+         */
+        onImageLoad: (url, comicId, epId) => {
+            let referer = epId ? this._chapterUrl(epId) : this.baseUrl + "/"
+            return { headers: this._imageHeaders(referer) }
+        },
+
+        /**
+         * 封面缩略图请求头(图床同样校验 Referer)
+         * @param url {string}
+         * @returns {ImageLoadingConfig}
+         */
+        onThumbnailLoad: (url) => {
+            return { headers: this._imageHeaders(this.baseUrl + "/") }
+        },
+
+        /**
+         * 加载详情页评论
+         * @param comicId {string}
+         * @param subId {string?} ComicDetails.subId(详情页 mid)
          * @param page {number}
-         * @param replyTo {string?}
-         * @returns {Promise<{comments: Comment[], maxPage: number}>}
+         * @param replyTo {string?} 形如 "评论id//页码"
+         */
+        loadComments: async (comicId, subId, page, replyTo) => {
+            let mid = String(subId === undefined || subId === null ? "" : subId).trim()
+            if (!/^\d+$/.test(mid)) {
+                let m = String(comicId || "").match(/manhua-(\d+)\/?$/i) || String(comicId || "").match(/^(\d+)$/)
+                mid = m ? m[1] : ""
+            }
+            if (!mid) {
+                throw new Error(`缺少漫画 mid, 无法加载详情评论: comicId=${comicId}`)
+            }
+
+            let requestPage = this._commentRequestPage(page, replyTo)
+            let pageSize = ManHuaRen.DETAIL_COMMENT_PAGE_SIZE
+            let url = `${this.baseUrl}/manhua-${mid}/pagerdata.ashx?d=${Date.now()}` +
+                `&pageindex=${requestPage - 1}&pagesize=${pageSize}&mid=${mid}&t=4`
+
+            let body = await this._fetch(url, `${this.baseUrl}/manhua-${mid}/`)
+            return this._parseComments(body, requestPage, pageSize, replyTo)
+        },
+
+        /**
+         * 加载章节评论
+         * @param comicId {string}
+         * @param epId {string} 形如 /m{cid}/
+         * @param page {number}
+         * @param replyTo {string?} 形如 "评论id//页码"
          */
         loadChapterComments: async (comicId, epId, page, replyTo) => {
-            let cidMatch = epId.match(/m(\d+)/);
-            let cid = cidMatch ? cidMatch[1] : null;
+            let cid = this._chapterDigits(epId) || this._chapterDigits(comicId)
             if (!cid) {
-                let match = epId.match(/(\d+)\/?$/);
-                if (match) cid = match[1];
-            }
-            
-            if (!cid) return { comments: [], maxPage: page };
-
-            let requestPage = page;
-            let targetCommentId = null;
-            if (replyTo) {
-                let parts = replyTo.split('//');
-                targetCommentId = parts[0];
-                requestPage = parseInt(parts[1]);
+                throw new Error(`无法从章节 id 解析 cid, 无法加载章节评论: epId=${epId}`)
             }
 
-            let pageSize = 20;
-            let url = `https://www.manhuaren.com/showcomment/pagerdata.ashx?d=${Date.now()}&pageindex=${requestPage}&pagesize=${pageSize}&cid=${cid}&t=9`;
-            
-            let headers = {
-                'accept': '*/*',
-                'accept-encoding': 'gzip, deflate, br, zstd',
-                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'cache-control': 'no-cache',
-                'connection': 'keep-alive',
-                'host': 'www.manhuaren.com',
-                'pragma': 'no-cache',
-                'referer': `https://www.manhuaren.com/showcomment/?cid=${cid}`,
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-origin',
-                'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-                'x-requested-with': 'XMLHttpRequest'
-            };
+            let requestPage = this._commentRequestPage(page, replyTo)
+            let pageSize = ManHuaRen.CHAPTER_COMMENT_PAGE_SIZE
+            let url = `${this.baseUrl}/showcomment/pagerdata.ashx?d=${Date.now()}` +
+                `&pageindex=${requestPage - 1}&pagesize=${pageSize}&cid=${cid}&t=9`
 
-            let res = await Network.get(url, headers);
-            if (res.status !== 200) return { comments: [], maxPage: page };
+            let body = await this._fetch(url, `${this.baseUrl}/showcomment/?cid=${cid}`)
+            return this._parseComments(body, requestPage, pageSize, replyTo)
+        },
 
-            let data = [];
-            try {
-                data = JSON.parse(res.body);
-            } catch (e) {}
+        // 站内漫画链接识别: /manhua-{slug}/ 或 https://www.manhuaren.com/manhua-{slug}/
+        idMatch: "^(?:https?://(?:www\\.)?manhuaren\\.com)?/?(manhua-[A-Za-z0-9\\-_]+)/?$",
 
-            if (!Array.isArray(data)) return { comments: [], maxPage: page };
-            
-            let comments = [];
-            let maxPage = 0
-            if (replyTo) {
-                let target = data.find(item => item.Id.toString() === targetCommentId);
-                if (target && target.ToPostShowDataItems) {
-                    comments = target.ToPostShowDataItems.map(item => new Comment({
-                        id: item.Id.toString(),
-                        userName: item.Poster,
-                        content: item.PostContent,
-                        time: item.PostTime,
-                        avatar: item.HeadUrl,
-                        likeCount: item.PraiseCount,
-                        isLiked: item.IsPraise,
-                        replyCount: 0
-                    }));
-                }
-            } else {
-                comments = data.map(item => new Comment({
-                    id: `${item.Id}//${page}`,
-                    userName: item.Poster,
-                    content: item.PostContent,
-                    time: item.PostTime,
-                    avatar: item.HeadUrl,
-                    likeCount: item.PraiseCount,
-                    isLiked: item.IsPraise,
-                    replyCount: item.ToPostShowDataItems ? item.ToPostShowDataItems.length : 0
-                }));
-                if (comments == []){
-                    maxPage = page;
-                }else{
-                    maxPage = null;
-                }
-            }
-
-            return {
-                comments: comments,
-                maxPage: replyTo? 1 : maxPage
-            };
+        link: {
+            domains: [
+                "manhuaren.com",
+                "www.manhuaren.com",
+            ],
+            linkToId: (url) => {
+                let m = String(url || "").match(/manhua-[A-Za-z0-9\-_]+/i)
+                return m ? this.baseUrl + "/" + m[0] + "/" : null
+            },
         },
     }
-
 }

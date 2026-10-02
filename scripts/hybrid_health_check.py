@@ -93,7 +93,11 @@ PROBES = {
         'name': '漫画柜',
         'url': 'https://www.manhuagui.com/',
         'method': 'GET',
-        'headers': {'User-Agent': 'Mozilla/5.0'},
+        'headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,zh-TW;q=0.8,en;q=0.7',
+        },
         'data': None,
         'line_opts': '官方主站 / 多 CDN',
         'advice': '• 站点位于境外且有防爬保护，LZString 混淆解密正常，建议在代理环境下使用。'
@@ -199,6 +203,40 @@ PROBES = {
         'advice': '• 台湾官方正版漫画站点，已内置合规 Web 请求头与 URI 编码，代理环境下速度更佳。'
     }
 }
+
+for key, name, url, advice in (
+    ('mkzhan', '漫客栈', 'https://comic.mkzcdn.com/search/filter/?order=1&page_num=1&page_size=1', '公开免费章节已本地验证；付费/VIP 阅读未验证。'),
+    ('dongmanla', '动漫啦', 'https://www.dongman.la/', '公开章节与正文图片已本地验证。'),
+    ('mangabz', 'Mangabz', 'https://www.mangabz.com/manga-list-0-1-10-p1/', 'ashx 章节图片解析已本地验证。'),
+    ('kanman', '看漫画', 'https://m.kanman.com/', '公开章节已本地验证；搜索仅过滤排行榜条目。'),
+    ('baihehui', '百合会', 'https://www.yamibo.com/site/manga', '公开帖子可匿名阅读；搜索需登录，登录态尚未验证。'),
+    ('comick', 'comick', 'https://comick.art/home', '公开正文已本地验证；单字符搜索会返回 HTTP 422。'),
+    ('hcomic', 'H-Comic', 'https://h-comic.com/', '公开搜索、详情与正文图片已本地验证。'),
+    ('hot_manga', '热辣漫画', 'https://api.2024manga.com/api/v3/h5/homeIndex', '匿名 API 章节与正文图片已本地验证。'),
+    ('manwaba', '漫蛙漫画', 'https://manwame.com/', 'AES 章节图片解密已本地验证。'),
+    ('mxs', '漫小肆', 'https://www.mxshm.top/', '公开搜索、详情与正文图片已本地验证。'),
+    ('xmanhua', 'X漫画', 'https://www.xmanhua.com/manga-list-0-1-10-p1/', 'ashx 章节图片解析已本地验证。'),
+    ('sisimanhua', '思思漫画', 'https://m.sisimanhua.com/', '正文图片已本地验证；探索分页待复核。'),
+    ('bukamh', '布卡漫画', 'https://www.bukamh.com/', 'AES 章节及图片响应解密已本地验证；探索分页待复核。'),
+    ('hipmh', '嬉皮漫画', 'https://hipapi1.s3file.top/v1/home', '独立 API 章节解密与正文图片已本地验证。'),
+    ('wmanhua', 'W漫画', 'https://www.wmanhua.com/', '公开搜索、详情与正文图片已本地验证。'),
+    ('shenqimanhua', '神奇漫画', 'https://shenqimanhua.net/', '公开搜索、详情与正文图片已本地验证。'),
+):
+    PROBES[key] = {
+        'name': name,
+        'url': url,
+        'method': 'GET',
+        'headers': {'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36'},
+        'data': None,
+        'line_opts': '主站 / 公开 API',
+        'advice': advice + ' 定时巡检目前仅连通级，不作为正文验收。',
+    }
+PROBES['hot_manga']['headers'].update({
+    'Accept': 'application/json', 'webp': '1', 'platform': '3',
+    'version': '2024.04.28', 'X-Requested-With': 'com.manga2020.app',
+})
+PROBES['rumanhua']['url'] = 'https://www.rumanhua.org/category/order/addtime'
+PROBES['rumanhua']['advice'] = '公开正文已验证；使用更新/分类入口，搜索尚未实现。'
 
 def get_pica_headers():
     path = "init"
