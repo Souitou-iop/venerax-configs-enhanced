@@ -53,6 +53,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.environ.get('E2E_OUT_DIR') or os.path.join(ROOT, 'work', 'e2e_run')
 PRODUCTION = False
 WRITE_README = False
+KNOWN_RESTRICTED_SOURCES = {'ikmmh', 'ManHuaGui'}
 
 UA_BROWSER = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
@@ -909,27 +910,44 @@ def e2e_zaimanhua():
     code, body, ms = http_req(f"https://v4api.zaimanhua.com/app/v1/comic/chapter/{cid}/{ep}",
                               headers=h, timeout=12)
     steps.append(f"章节图片接口 → HTTP {code} ({ms}ms)")
-    img_url = None
+    image_urls = []
     if code == 200:
         d = json_body(body)
         try:
             dd = d["data"]["data"]
-            imgs = dd.get("page_url_hd") or dd.get("page_url") or []
-            if imgs:
-                img_url = imgs[0]
+            # CDN 偶发只坏一张图；合并高清/普通列表并验证前五张，避免单点误报。
+            for url in (dd.get("page_url_hd") or []) + (dd.get("page_url") or []):
+                if url and url not in image_urls:
+                    image_urls.append(url)
         except Exception:
             pass
-    if not img_url:
+    if not image_urls:
         return result('ERROR', 'content', detail="章节无图片 URL", steps=steps)
 
-    code, body, ms = http_req(img_url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.zaimanhua.com/"},
-                              timeout=15)
-    kind = img_magic(body)
-    steps.append(f"下载图片 → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}")
-    if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
-        return result('OK_CONTENT', 'content', latency=ms, code=200,
-                      detail=f"端到端成功: {len(body)} 字节 {kind}", steps=steps)
-    return result('ERROR', 'content', code=code, detail=f"图片链路失败 ({kind or code})", steps=steps)
+    candidates = image_urls[:5]
+    failures = []
+    for index, img_url in enumerate(candidates, 1):
+        code, body, ms = http_req(
+            img_url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.zaimanhua.com/"},
+            timeout=15,
+        )
+        kind = img_magic(body)
+        steps.append(
+            f"下载图片[{index}/{len(candidates)}] → HTTP {code}, {len(body)} 字节 ({ms}ms), 识别 {kind or '非图片'}"
+        )
+        if code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF"):
+            return result('OK_CONTENT', 'content', latency=ms, code=200,
+                          detail=f"端到端成功: 第 {index} 张图片 {len(body)} 字节 {kind}", steps=steps)
+        failures.append(f"{code}/{kind or '非图片'}")
+
+    return result(
+        'ERROR',
+        'content',
+        code=code,
+        detail=f"前 {len(candidates)} 张图片链路均失败 ({', '.join(failures)})",
+        steps=steps,
+    )
 
 
 def e2e_baozi():
@@ -1497,7 +1515,7 @@ def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
         alertable.add('__mainland_engine__')
     for key, value in overseas.items():
         # 已知受限源仅在 README 展示，避免把运行环境限制当作站点故障告警。
-        if key not in {'ikmmh', 'ManHuaGui'} and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
+        if key not in KNOWN_RESTRICTED_SOURCES and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
             alertable.add(key)
     alertable.update(f'core:{key}' for key in conn_core_bad)
     should_alert = False
@@ -1609,7 +1627,8 @@ def main():
 
     # Step 4: 判定汇总 + 告警规则
     content_bad = [k for k, v in overseas.items()
-                   if v['verdict'] in ('DOWN', 'BLOCKED', 'ERROR')]
+                   if k not in KNOWN_RESTRICTED_SOURCES
+                   and v['verdict'] in ('DOWN', 'BLOCKED', 'ERROR')]
     conn_core_bad = []
     if mainland:
         for core_key in ('copy_manga', 'Komiic', 'baozi'):
