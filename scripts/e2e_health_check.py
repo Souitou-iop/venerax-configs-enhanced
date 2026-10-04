@@ -251,13 +251,12 @@ PROBLEM_EXPLAIN = {
     'DOWN':           '❌ **无法连通** —— 服务器完全无响应',
     'BLOCKED':        '🔴 **请求被拦截** (403/429) —— 无法确认内容是否可用',
     'RISK_CONTROL':   '🟠 **风控/限频 —— 图片加载不出** —— 接口活着但读内容被限制',
-    'LOGIN_REQUIRED': '🟡 **需要登录** —— 游客身份看不到内容',
     'ERROR':          '⚠️ **探测异常** —— 返回了意料之外的内容，需人工关注',
 }
 
 
 def build_problem_report(overseas):
-    """README 异常源报告: 只列有问题的源, 用大白话说明哪个源出了什么事。"""
+    """README 异常源报告: 只列实际故障/拦截/探测异常；需登录不是源故障。"""
     problems = [(k, v) for k, v in overseas.items() if v['verdict'] in PROBLEM_EXPLAIN]
     if not problems:
         n_content = sum(1 for v in overseas.values() if v['tier'] == 'content')
