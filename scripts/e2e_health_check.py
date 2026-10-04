@@ -1460,7 +1460,7 @@ TIER_LABEL = {'content': '`内容级` (真实下载图片字节)', 'data': '`数
 def build_readme_section(overseas, mainland, engine_name):
     dual_time = get_dual_time_str(False)
     start_marker = "## 🧭 各漫画源最佳线路与网络推荐指南 (Recommended Lines)"
-    end_marker = "## 🛠️ 重点修复与更新日志 (Changelog)"
+    end_marker = "## 🛠️ 修复与更新日志 (Changelog)"
     problem_report = build_problem_report(overseas)
 
     md = f"""{start_marker}
@@ -1468,7 +1468,7 @@ def build_readme_section(overseas, mainland, engine_name):
 > 🕒 **实测数据更新时间**：{dual_time}  
 > 🌐 **双网络实测节点**：**中国大陆直连**（{engine_name}） vs **海外代理网络**（GitHub Actions Runner）  
 > 🔬 **探测深度**：`内容级` = 真实走完 搜索→详情→章节→下载图片字节 并校验图片格式；`数据级` = 业务接口返回可解析数据；`连通级` = 仅状态码  
-> 🚦 **判定口径（诚实版）**：🟢 端到端正常/数据正常/可连通 ｜ 🟠 风控·限频·配额耗尽 ｜ 🟡 需登录 ｜ 🔴 被拦截 (403/429/210，**不再亮绿灯**) ｜ ❌ 无法直连
+> 🚦 **判定口径**：🟢 端到端正常/数据正常/可连通 ｜ 🟠 风控·限频·配额耗尽 ｜ 🟡 需登录 ｜ 🔴 被拦截 (403/429/210，**不再亮绿灯**) ｜ ❌ 无法直连
 > **覆盖说明**：按表内深度解释结果；新增源目前为连通级，不能据此判断正文是否可读；大陆节点缺项显示“未测”。
 
 {problem_report}| 漫画源 | 线路 / 分流选项 | 探测深度 | 大陆骨干直连实测 | 海外代理实测 (分级判定) | 实测说明 |
@@ -1544,7 +1544,7 @@ def write_readme_section(readme_section):
     path = os.path.join(ROOT, 'README.md')
     text = Path(path).read_text(encoding='utf-8')
     start = "## 🧭 各漫画源最佳线路与网络推荐指南 (Recommended Lines)"
-    end = "## 🛠️ 重点修复与更新日志 (Changelog)"
+    end = "## 🛠️ 修复与更新日志 (Changelog)"
     a, b = text.find(start), text.find(end)
     if a < 0 or b < 0 or a >= b:
         print('[WARN] README markers missing; real README was not modified')
