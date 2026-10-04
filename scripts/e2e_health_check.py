@@ -54,6 +54,10 @@ OUT_DIR = os.environ.get('E2E_OUT_DIR') or os.path.join(ROOT, 'work', 'e2e_run')
 PRODUCTION = False
 WRITE_README = False
 KNOWN_RESTRICTED_SOURCES = {'ikmmh', 'ManHuaGui'}
+BEIJING_TZ = timezone(timedelta(hours=8))
+CCC_MAINTENANCE_START = datetime(2026, 10, 3, 10, tzinfo=BEIJING_TZ)
+CCC_MAINTENANCE_END = datetime(2026, 10, 4, 18, tzinfo=BEIJING_TZ)
+CCC_MAINTENANCE_WINDOW = '2026-10-03 10:00 至 2026-10-04 18:00（UTC+8）'
 
 UA_BROWSER = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
@@ -268,7 +272,18 @@ def build_problem_report(overseas):
            "不代表正文图片通过或失败。\n\n")
     md += "| 漫画源 | 探测深度 | 出了什么问题 | 具体情况 |\n| :--- | :--- | :--- | :--- |\n"
     for k, v in problems:
-        md += f"| **{hhc.PROBES[k]['name']}** | {v['tier']} | {PROBLEM_EXPLAIN[v['verdict']]} | {v['detail'] or '—'} |\n"
+        explanation = PROBLEM_EXPLAIN[v['verdict']]
+        detail = v['detail'] or '—'
+        if k == 'ccc' and v['verdict'] == 'BLOCKED':
+            now = datetime.now(BEIJING_TZ)
+            if now < CCC_MAINTENANCE_START:
+                explanation = '🟠 **计划维护** —— 维护窗口尚未开始'
+            elif now <= CCC_MAINTENANCE_END:
+                explanation = '🟠 **官方维护中** —— 维护窗口内暂不按源代码故障处理'
+            else:
+                explanation = '🔴 **维护窗口已结束仍不可用** —— 需要继续排查服务状态'
+            detail = f'官方维护窗口：{CCC_MAINTENANCE_WINDOW}；{detail}'
+        md += f"| **{hhc.PROBES[k]['name']}** | {v['tier']} | {explanation} | {detail} |\n"
     return md + "\n"
 
 
