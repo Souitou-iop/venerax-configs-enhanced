@@ -111,6 +111,66 @@ jobs:
             fi
           fi
 
+      - name: Auto-close recovered alert Issues
+        # Must run AFTER the alert-Issue step: a run that both opens and closes Issues would
+        # otherwise close a stale Issue and immediately file a fresh one. The probe's state machine
+        # only ever opens alerts, so without this step recovered sources leave red flags forever.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          META="work/e2e_run/alert_meta.json"
+          if [ ! -f "$META" ]; then
+            echo "ℹ️ No alert metadata (probe did not complete); leaving Issues untouched."
+            exit 0
+          fi
+          # A run that just filed a new Issue is not a recovery; its body already reports state.
+          if [ -f "work/e2e_run/has_alert.txt" ] && [ "$(cat work/e2e_run/has_alert.txt)" = "true" ]; then
+            echo "ℹ️ This run raised an alert; skipping auto-close."
+            exit 0
+          fi
+          OUTSTANDING=$(jq -r '.outstanding | length' "$META")
+          RECOVERED=$(jq -r '.recovered | join("、")' "$META")
+          RECOVERED_N=$(jq -r '.recovered | length' "$META")
+          # Only the probe's own source-alert Issues; never the community report or crash Issues.
+          OPEN_IDS=$(gh issue list --state open --limit 100 --json number,title --jq \
+            '.[] | select(.title | contains("探活异常告警")) | select(.title | contains("探针进程崩溃") | not) | .number' \
+            2>/dev/null || true)
+          if [ -z "$OPEN_IDS" ]; then
+            echo "ℹ️ No open alert Issue (outstanding=$OUTSTANDING, recovered=$RECOVERED)."
+            exit 0
+          fi
+          # OUTSTANDING==0 means no source is alerting right now, so every open alert Issue is
+          # stale — including ones whose recovery was consumed before this step existed.
+          if [ "$OUTSTANDING" = "0" ]; then
+            for N in $OPEN_IDS; do
+              echo "✅ No source alerting — closing stale Issue #$N."
+              {
+                echo "**自动销单**：本轮探测未发现任何处于告警态的源，本 Issue 已无对应故障。"
+                echo ""
+                if [ -n "$RECOVERED" ]; then
+                  echo "本轮恢复的源：**$RECOVERED**（连续异常计数清零，告警状态解除）。"
+                  echo ""
+                fi
+                echo "若后续再次连续 2 次异常，探针会自动开新 Issue。"
+              } > /tmp/recovered_comment.md
+              gh issue comment "$N" --body-file /tmp/recovered_comment.md || true
+              gh issue close "$N" --reason completed || true
+            done
+          elif [ "$RECOVERED_N" != "0" ]; then
+            for N in $OPEN_IDS; do
+              echo "ℹ️ Partial recovery ($RECOVERED) — commenting on Issue #$N."
+              {
+                echo "**部分恢复**：以下源本轮已恢复正常：**$RECOVERED**"
+                echo ""
+                echo "仍有 $OUTSTANDING 个源处于告警态，本 Issue 保持打开。"
+              } > /tmp/partial_comment.md
+              gh issue comment "$N" --body-file /tmp/partial_comment.md || true
+            done
+          else
+            echo "ℹ️ No recovery this run; outstanding=$OUTSTANDING."
+          fi
+
       - name: Commit and Push README Updates
         if: steps.run_probe.outcome == 'success'
         run: |

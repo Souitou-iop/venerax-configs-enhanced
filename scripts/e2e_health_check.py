@@ -233,6 +233,14 @@ def result(verdict, tier, latency=-1, code=None, detail="", steps=None):
             "detail": detail, "steps": steps or []}
 
 
+def body_snippet(body, limit=80):
+    """压缩响应体成一行，供告警详情引用（5xx 常只有 WAF/网关错误页，正文即线索）。"""
+    if not isinstance(body, (bytes, bytearray)) or not body:
+        return ''
+    text = re.sub(r'\s+', ' ', body.decode('utf-8', 'ignore')).strip()
+    return text[:limit]
+
+
 def get_dual_time_str(include_seconds=False):
     return hhc.get_dual_time_str(include_seconds)
 
@@ -1393,24 +1401,37 @@ def conn_probe(key):
     code, body, ms = http_req(p['url'], headers=headers, data=p.get('data'),
                               method=p.get('method', 'GET'), timeout=10)
     steps = [f"{p['url']} → HTTP {code} ({ms}ms)"]
+    # 告警表只渲染 detail 字段，任何非 OK 分支都必须自带可读说明，否则 Issue 里是一片空白。
+    snippet = body_snippet(body)
+    if snippet:
+        steps.append(f"响应体片段: {snippet}")
+    tail = f"（{snippet}）" if snippet else ''
     if code in (200, 201, 206):
         return result('OK_CONN', 'conn', latency=ms, code=code,
                       detail=f"连通正常; 未接入内容级探测（仅状态码）", steps=steps)
     if code == 401:
-        return result('LOGIN_REQUIRED', 'conn', code=code, steps=steps)
+        return result('LOGIN_REQUIRED', 'conn', code=code,
+                      detail=f"HTTP {code} —— 入口需登录账号", steps=steps)
     if code in (403, 429):
         if key == 'ikmmh':
             # 爱看漫真实域名仅大陆网络可达, 海外/代理网络永久 403, 属已知网络限制而非站点故障。
             detail = (f"HTTP {code} —— 站点拦截海外/机房网络；"
                       "www.ikmmh.com 仅大陆网络可达, 出海或代理环境无法使用")
         else:
-            detail = f"HTTP {code} —— 现行探针对此亮绿灯"
+            detail = f"HTTP {code} —— 现行探针对此亮绿灯" + tail
         return result('BLOCKED', 'conn', code=code, detail=detail, steps=steps)
     if code == 210:
-        return result('RISK_CONTROL', 'conn', code=code, steps=steps)
+        return result('RISK_CONTROL', 'conn', code=code,
+                      detail=f"HTTP {code} —— 站点限频/风控拦截" + tail, steps=steps)
     if code == 'ERR':
-        return result('DOWN', 'conn', code=code, steps=steps)
-    return result('ERROR', 'conn', code=code, steps=steps)
+        return result('DOWN', 'conn', code=code,
+                      detail=f"无法连接: {snippet or '连接超时或被拒绝'}", steps=steps)
+    if isinstance(code, int) and 500 <= code < 600:
+        # 5xx 多为站点自身或 CDN/WAF 回源失败（如百合会 yamibo 的 BAIDU_WAF 521），非探针问题。
+        return result('ERROR', 'conn', code=code,
+                      detail=f"HTTP {code} —— 站点/网关自身故障" + tail, steps=steps)
+    return result('ERROR', 'conn', code=code,
+                  detail=f"HTTP {code} —— 非预期状态码" + tail, steps=steps)
 
 
 CONTENT_PROBES = {
@@ -1523,6 +1544,13 @@ def save_probe_state(state):
 
 
 def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
+    """推进告警状态机，返回本轮告警决策。
+
+    should_alert  本轮有源首次达到告警阈值（连续 2 次异常）
+    triggered     本轮新触发告警的 key（标题/正文只写这些，避免把偶发抖动的源并列成同案）
+    recovered     本轮由告警态恢复正常、可以销单的 key
+    outstanding   仍处于告警态的 key（workflow 据此判断能否关闭未结的告警 Issue）
+    """
     state = load_probe_state()
     alertable = set()
     if engine_failed:
@@ -1532,13 +1560,14 @@ def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
         if key not in KNOWN_RESTRICTED_SOURCES and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
             alertable.add(key)
     alertable.update(f'core:{key}' for key in conn_core_bad)
-    should_alert = False
+    triggered, recovered = [], []
     for key in set(state) | alertable:
         item = state.get(key, {'consecutive_bad': 0, 'alerted': False})
+        was_alerted = bool(item.get('alerted', False))
         if key in alertable:
             item['consecutive_bad'] = int(item.get('consecutive_bad', 0)) + 1
-            if item['consecutive_bad'] >= 2 and not item.get('alerted', False):
-                should_alert = True
+            if item['consecutive_bad'] >= 2 and not was_alerted:
+                triggered.append(key)
                 item['alerted'] = True
             if key == '__mainland_engine__':
                 item['last_verdict'] = 'ENGINE_FAILED'
@@ -1547,12 +1576,16 @@ def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
             else:
                 item['last_verdict'] = overseas[key]['verdict']
         else:
+            if was_alerted:
+                recovered.append(key)
             item['consecutive_bad'] = 0
             item['alerted'] = False
             item['last_verdict'] = 'OK'
         state[key] = item
     save_probe_state(state)
-    return should_alert
+    outstanding = [k for k, v in state.items() if v.get('alerted')]
+    return {'should_alert': bool(triggered), 'triggered': triggered,
+            'recovered': recovered, 'outstanding': outstanding}
 
 
 def write_readme_section(readme_section):
@@ -1589,22 +1622,59 @@ def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
     return md
 
 
-def build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad):
+def _alert_key_names(keys):
+    """把内部告警 key 转成可读名称（含引擎失效/主力源下线的虚拟 key）。"""
+    names = []
+    for k in keys:
+        if k == '__mainland_engine__':
+            names.append('大陆双探活引擎')
+        elif k.startswith('core:'):
+            src = k.split(':', 1)[1]
+            names.append(f"{hhc.PROBES.get(src, {}).get('name', src)} (主力源)")
+        else:
+            names.append(hhc.PROBES.get(k, {}).get('name', k))
+    return names
+
+
+def build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad,
+                     triggered=None, recovered=None, outstanding=None):
+    keys = list(triggered) if triggered is not None else list(content_bad) + list(conn_core_bad)
     body = f"## 🚨 [VeneraX 探活告警] 源探测发现异常\n\n"
     body += f"- **检测时间**：{get_dual_time_str(True)}\n"
     body += f"- **大陆直连引擎**：`{engine_name or '全部失效 (已报警)'}`\n\n"
     if not mainland:
         body += "### ❗ 大陆双探活引擎失效\n私有 SSH 探针连接失败，且 Globalping 备用公共探针无响应。请检查探针服务器或 Secrets 配置。\n\n"
-    if content_bad:
-        body += "### 📉 源探测异常（按实际探测深度判定）\n\n"
-        body += "| 漫画源 | 探测深度 | 判定 | 详情 |\n| :--- | :--- | :--- | :--- |\n"
-        for k in content_bad:
+    rows = []
+    for k in keys:
+        if k.startswith('core:'):
+            src = k.split(':', 1)[1]
+            name = hhc.PROBES.get(src, {}).get('name', src)
+            ov = overseas.get(src) or {}
+            cn_item = (mainland or {}).get(src, {})
+            # 主力的告警条件是「双端延迟 -1」，但海外 210/403 属于有响应却被风控，不能写成无法直连。
+            badge = VERDICT_BADGE.get(ov.get('verdict'), VERDICT_BADGE['DOWN']) \
+                if ov.get('verdict') else VERDICT_BADGE['DOWN']
+            detail = (f"大陆直连不可用 (`{cn_item.get('code', '-')}`)；"
+                      f"海外 `{ov.get('code', '-')}` —— {ov.get('detail') or '无响应'}")
+            rows.append(f"| **{name}** (主力源) | {ov.get('tier', 'conn')} | {badge} | {detail} |")
+        elif k in overseas:
             ov = overseas[k]
-            body += f"| **{hhc.PROBES[k]['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | {ov['detail']} |\n"
-        body += "\n"
-    if conn_core_bad:
-        names = "、".join(hhc.PROBES[k]['name'] for k in conn_core_bad)
-        body += f"### ❗ 主力源连通级异常\n以下主力源双端均无法连接：**{names}**\n"
+            rows.append(f"| **{hhc.PROBES[k]['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | "
+                        f"{ov['detail'] or '—'} |")
+        elif k == '__mainland_engine__':
+            rows.append(f"| **大陆双探活引擎** | engine | ❌ **无法直连** | SSH 私有探针与 Globalping 备用探针均无响应 |")
+    if rows:
+        body += "### 📉 源探测异常（连续 2 次异常才计入告警）\n\n"
+        body += "| 漫画源 | 探测深度 | 判定 | 详情 |\n| :--- | :--- | :--- | :--- |\n"
+        body += "\n".join(rows) + "\n\n"
+    if outstanding:
+        still = "、".join(_alert_key_names(outstanding))
+        body += f"### ⏳ 仍在告警态的源\n{still}\n\n"
+    if recovered:
+        back = "、".join(_alert_key_names(recovered))
+        body += (f"### ✅ 已恢复\n以下源本轮恢复正常，对应告警状态已清除：**{back}**\n\n")
+    if not rows and not recovered:
+        body += "### ❗ 告警触发\n本轮存在达到告警阈值的异常，详见运行产物中的 `results.json`。\n\n"
     return body
 
 # ---------------------------------------------------------------- 主流程（模拟 GitHub workflow 步骤）
@@ -1618,7 +1688,7 @@ def main():
     PRODUCTION = args.production
     WRITE_README = args.write_readme or PRODUCTION
     os.makedirs(OUT_DIR, exist_ok=True)
-    for filename in ('has_alert.txt', 'health_check_alert.md', 'alert_title.txt'):
+    for filename in ('has_alert.txt', 'health_check_alert.md', 'alert_title.txt', 'alert_meta.json'):
         path = os.path.join(OUT_DIR, filename)
         if os.path.exists(path):
             os.remove(path)
@@ -1650,15 +1720,27 @@ def main():
                 conn_core_bad.append(core_key)
     engine_failed = mainland is None
 
-    has_alert = update_alert_state(overseas, mainland, engine_failed, conn_core_bad) if PRODUCTION else (engine_failed or bool(content_bad) or bool(conn_core_bad))
+    if PRODUCTION:
+        decision = update_alert_state(overseas, mainland, engine_failed, conn_core_bad)
+    else:
+        # 演练模式不落盘状态机，等价于「首次即告警」：本轮异常源全部计为仍在告警，产物才不会自相矛盾。
+        dry_triggered = list(content_bad) + [f'core:{k}' for k in conn_core_bad] \
+                        + (['__mainland_engine__'] if engine_failed else [])
+        decision = {'should_alert': bool(dry_triggered),
+                    'triggered': dry_triggered, 'recovered': [], 'outstanding': dry_triggered}
+    has_alert = decision['should_alert']
+    triggered, recovered, outstanding = (decision['triggered'], decision['recovered'],
+                                         decision['outstanding'])
     alert_msg = None
     if has_alert:
-        alert_msg = "源探测发现异常" if (content_bad or conn_core_bad) else "大陆双探活引擎失效"
-        alert_body = build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad)
+        alert_msg = "源探测发现异常" if (triggered or content_bad or conn_core_bad) else "大陆双探活引擎失效"
+        alert_body = build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad,
+                                      triggered=triggered, recovered=recovered,
+                                      outstanding=[k for k in outstanding if k not in triggered])
         with open(os.path.join(OUT_DIR, 'health_check_alert.md'), 'w', encoding='utf-8') as f:
             f.write(alert_body)
-        # Issue 标题带上受影响源名，多条告警在 Issue 列表里才能互相区分（正文/告警文件由 workflow 读取）。
-        bad_names = [hhc.PROBES[k]['name'] for k in dict.fromkeys(content_bad + conn_core_bad) if k in hhc.PROBES]
+        # Issue 标题只写本轮越过告警阈值的源，避免把单次抖动的源并进真实故障的标题。
+        bad_names = _alert_key_names([k for k in dict.fromkeys(triggered)])
         if bad_names:
             shown = '、'.join(bad_names[:3])
             if len(bad_names) > 3:
@@ -1669,6 +1751,14 @@ def main():
         with open(os.path.join(OUT_DIR, 'alert_title.txt'), 'w', encoding='utf-8') as f:
             f.write(alert_title)
         print(f"\n🚨 告警成立: {alert_msg} → {OUT_DIR}/health_check_alert.md")
+
+    # 告警状态机元数据：workflow 据此在全部源恢复后自动销单，恢复部分源时补评论。
+    with open(os.path.join(OUT_DIR, 'alert_meta.json'), 'w', encoding='utf-8') as f:
+        json.dump({'has_alert': has_alert,
+                   'triggered': _alert_key_names(triggered),
+                   'recovered': _alert_key_names(recovered),
+                   'outstanding': _alert_key_names(outstanding),
+                   'recovered_keys': recovered}, f, ensure_ascii=False, indent=2)
 
     # Step 5: 产物输出（全部写入 work/e2e_run/, 不触碰真实 README.md）
     with open(os.path.join(OUT_DIR, 'results.json'), 'w', encoding='utf-8') as f:
