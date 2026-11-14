@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -64,9 +65,11 @@ class VsaRuntimeError(Exception):
 
 
 class VeneraRuntime:
-    def __init__(self, binary: Path | None = None, auto_build: bool = False):
+    def __init__(self, binary: Path | None = None, auto_build: bool = False,
+                 home_dir: Path | None = None):
         self.binary = Path(binary or DEFAULT_RUNTIME)
         self.auto_build = auto_build
+        self.home_dir = Path(home_dir) if home_dir else None
         self._version: str | None = None
 
     def ensure(self) -> Path:
@@ -79,16 +82,31 @@ class VeneraRuntime:
             f"venera 运行时不存在: {self.binary} (先用 --build 构建或 Dart 手动构建)"
         )
 
+    def _env(self) -> dict:
+        """独立 HOME 隔离 CLI 数据目录(源库/cookie), 避免加载历史源拖慢启动并保证可复现。"""
+        env = os.environ.copy()
+        if self.home_dir:
+            home = Path(self.home_dir)
+            home.mkdir(parents=True, exist_ok=True)
+            env["HOME"] = str(home)
+        return env
+
     def build(self) -> Path:
-        """克隆(如缺)并构建 venera_cli + VSA Dart runner; 需要 PATH 中有 dart。"""
+        """克隆(如缺)并构建 venera_cli + VSA Dart runner; 需要 PATH 中有 dart。
+
+        VSA_CLI_PIN 环境变量可固定上游 CLI commit(可复现构建)。
+        """
         if shutil.which("dart") is None:
             raise VsaRuntimeError("构建需要 Dart SDK (PATH 中找不到 dart)")
         if not CLI_SRC.exists():
             CLI_SRC.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "clone", "--depth", "1", CLI_REPO, str(CLI_SRC)],
+                ["git", "clone", CLI_REPO, str(CLI_SRC)],
                 check=True, capture_output=True,
             )
+        pin = os.environ.get("VSA_CLI_PIN", "").strip()
+        if pin:
+            subprocess.run(["git", "checkout", "--detach", pin], cwd=CLI_SRC, check=True, capture_output=True)
         subprocess.run(["dart", "pub", "get"], cwd=CLI_SRC, check=True, capture_output=True)
         out_dir = self.binary.parent.parent.parent  # .../runtime
         subprocess.run(
@@ -129,6 +147,7 @@ class VeneraRuntime:
             proc = subprocess.run(
                 [str(binary), *args],
                 capture_output=True, text=True, timeout=timeout,
+                env=self._env(),
             )
             return CmdResult(
                 ok=proc.returncode == 0,
@@ -169,3 +188,13 @@ class VeneraRuntime:
     @staticmethod
     def js_sha256(js_path: Path) -> str:
         return hashlib.sha256(js_path.read_bytes()).hexdigest()
+
+    @staticmethod
+    def build_id(src_dir: Path) -> str:
+        """记录构建来源 commit(可复现性); 非 git 目录返回 unknown。"""
+        try:
+            r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=src_dir,
+                               capture_output=True, text=True, timeout=10)
+            return r.stdout.strip() or "unknown"
+        except Exception:
+            return "unknown"

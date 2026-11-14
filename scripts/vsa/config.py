@@ -35,9 +35,11 @@ class SourceTestConfig:
     image_headers: dict = field(default_factory=dict)
     image_count: int = 2
     max_page: int = 1
-    expect: str = "pass"  # pass | blocked
+    expect: str = "pass"  # 已知受限先验(仅作报告标注, 不再控制提前返回; 归因以实际证据为准)
     blocked_reason: str = ""
-    blocked_patterns: list = field(default_factory=list)
+    blocked_patterns: list = field(default_factory=list)  # 类型化: {status: 403}/{err: x}/{body: x}; 裸数字→status
+    exempt: bool = False  # 明确豁免(不计入已验收, 须给 reason)
+    exempt_reason: str = ""
 
 
 @dataclass
@@ -46,6 +48,7 @@ class VsaConfig:
     timeout_stage: int = 120
     timeout_image: int = 60
     delay_between_sources: float = 2.0
+    allow_local: bool = False  # 离线 Fixture 模式允许访问本地服务
 
     def get(self, key: str) -> SourceTestConfig | None:
         return self.sources.get(key)
@@ -60,6 +63,7 @@ def load_config(path: Path) -> VsaConfig:
     cfg.timeout_stage = int(defaults.get("timeout_stage", 120))
     cfg.timeout_image = int(defaults.get("timeout_image", 60))
     cfg.delay_between_sources = float(defaults.get("delay_between_sources", 2.0))
+    cfg.allow_local = bool(defaults.get("allow_local", False))
     for key, item in (raw.get("sources") or {}).items():
         item = item or {}
         cfg.sources[key] = SourceTestConfig(
@@ -75,6 +79,8 @@ def load_config(path: Path) -> VsaConfig:
             expect=str(item.get("expect", "pass")),
             blocked_reason=str(item.get("blocked_reason", "")),
             blocked_patterns=list(item.get("blocked_patterns") or []),
+            exempt=bool(item.get("exempt", False)),
+            exempt_reason=str(item.get("exempt_reason", "")),
         )
     return cfg
 

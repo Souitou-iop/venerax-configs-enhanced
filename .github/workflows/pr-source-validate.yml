@@ -3,6 +3,9 @@ name: PR Source Validate
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   validate-sources:
     runs-on: ubuntu-latest
@@ -67,11 +70,22 @@ jobs:
         if: steps.changed-configs.outputs.count == '0'
         run: echo "No changed config files to validate."
 
-      # VSA 离线回归: 本地 fixture 走真实运行时验证框架判定路径(正向 + 负向),
-      # 不访问第三方网站, 失败会阻断合并(确定性检查作为 PR 门槛)。
-      - name: VSA offline regression
+      # VSA 覆盖率门槛: 正式源必须全部纳管(有测试配置或明确豁免), 无静默漏测
+      - name: VSA coverage check
         run: |
           pip install pyyaml
+          python scripts/source_assurance.py --check-coverage --output /tmp/vsa_out
+
+      # VSA 离线回归: 本地 fixture 走真实运行时(含 Dart runner)验证框架判定路径
+      # (正向 + 截断/HTML充图/SSRF/计数/声明掩盖/Runner异常等负向), 不访问第三方网站。
+      - name: VSA offline regression
+        run: |
+          cd scripts/vsa_dart
+          dart pub get
+          dart build cli --target bin/vsa_runner.dart --output /tmp/vsa_runner
+          cd ../..
           python scripts/source_assurance.py --self-test \
             --runtime /tmp/venera/bundle/bin/venera \
+            --runner /tmp/vsa_runner/bundle/bin/vsa_runner \
+            --data-dir /tmp/vsa_data \
             --output /tmp/vsa_out
