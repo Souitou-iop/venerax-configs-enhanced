@@ -7,7 +7,7 @@
 class Dongmanla extends ComicSource {
   name = "动漫啦";
   key = "dongmanla";
-  version = "1.0.1";
+  version = "1.0.2";
   minAppVersion = "1.0.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/dongmanla.js";
 

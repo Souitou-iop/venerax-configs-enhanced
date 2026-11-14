@@ -156,7 +156,7 @@
     "name": "动漫啦",
     "fileName": "dongmanla.js",
     "key": "dongmanla",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "动漫啦：搜索/分类/章节/图片；v1.0.1 适配站点 Tailwind 改版(通用 detail 锚点兜底)",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/dongmanla.js"
   },
@@ -260,7 +260,7 @@
     "name": "W漫画",
     "fileName": "wmanhua.js",
     "key": "wmanhua",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "description": "公开搜索、详情与正文图片通过；v1.0.4 适配站点改版(卡片封面/搜索 a.book 结构)",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/wmanhua.js"
   },

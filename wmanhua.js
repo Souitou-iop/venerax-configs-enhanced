@@ -1,7 +1,7 @@
 class WManhuaSource extends ComicSource {
     name = "W漫画"
     key = "wmanhua"
-    version = "1.0.4"
+    version = "1.0.5"
     minAppVersion = "1.6.0"
     url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/wmanhua.js"
 
