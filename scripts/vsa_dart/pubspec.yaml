@@ -1,0 +1,12 @@
+name: vsa_runner
+description: VSA 薄 Dart runner — 基于 venera_core 在真实运行时内完成章节取图与图片字节验证
+version: 0.1.0
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  venera_core:
+    git:
+      url: https://github.com/venera-app/venera_core.git
+  dio: ^5.0.0

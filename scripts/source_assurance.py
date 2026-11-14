@@ -43,7 +43,13 @@ from vsa.chain import (  # noqa: E402
 from vsa.config import SourceTestConfig, VsaConfig, load_config  # noqa: E402
 from vsa.fixture import FixtureServer, generate_fixture_sources  # noqa: E402
 from vsa.report import build_report, write_json, write_markdown  # noqa: E402
-from vsa.runtime import DEFAULT_RUNTIME, VeneraRuntime, VsaRuntimeError  # noqa: E402
+from vsa.runtime import (  # noqa: E402
+    DEFAULT_DATA_DIR,
+    DEFAULT_RUNNER,
+    DEFAULT_RUNTIME,
+    VeneraRuntime,
+    VsaRuntimeError,
+)
 
 DEFAULT_CONFIG = REPO_ROOT / "scripts/vsa_sources.yml"
 DEFAULT_OUTPUT = REPO_ROOT / "work/vsa/reports"
@@ -79,7 +85,8 @@ def resolve_js_path(key: str, index: dict, offline_dir: Path | None) -> Path | N
     return p if p.exists() else None
 
 
-def run_live(args, rt: VeneraRuntime, cfg: VsaConfig, index: dict) -> list[SourceResult]:
+def run_live(args, rt: VeneraRuntime, cfg: VsaConfig, index: dict,
+             runner_binary, data_dir) -> list[SourceResult]:
     keys = select_sources(args, cfg, index)
     results: list[SourceResult] = []
     for i, key in enumerate(keys):
@@ -94,7 +101,8 @@ def run_live(args, rt: VeneraRuntime, cfg: VsaConfig, index: dict) -> list[Sourc
             continue
         print(f"  [{key:14}] 验收中...", flush=True)
         try:
-            res = run_source(rt, js_path, scfg, cfg, index.get(key))
+            res = run_source(rt, js_path, scfg, cfg, index.get(key),
+                             runner_binary=runner_binary, data_dir=data_dir)
         except VsaRuntimeError as e:
             res = SourceResult(key=key, file_name=js_path.name)
             res.state = STATE_ERROR
@@ -186,6 +194,8 @@ def main():
     ap.add_argument("--self-test", action="store_true", help="离线负向自检(框架判定路径)")
     ap.add_argument("--output", default=str(DEFAULT_OUTPUT), help="报告输出目录")
     ap.add_argument("--runtime", default=str(DEFAULT_RUNTIME), help="venera 运行时路径")
+    ap.add_argument("--runner", default=str(DEFAULT_RUNNER), help="VSA Dart runner 路径(运行时内取图)")
+    ap.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="runner 数据目录(cookie 持久化)")
     ap.add_argument("--build", action="store_true", help="运行时缺失时自动构建(需 Dart)")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG), help="每源测试配置")
     ap.add_argument("--index", default=str(REPO_ROOT / "index.json"))
@@ -200,14 +210,22 @@ def main():
     try:
         rt = VeneraRuntime(binary=Path(args.runtime), auto_build=args.build)
         rt.ensure()
+        runner = Path(args.runner)
+        if not runner.exists() and args.build and Path(args.runtime).exists():
+            # CLI 已存在而 runner 缺失时, 只补建 runner
+            from vsa.runtime import VeneraRuntime as _R
+            _R(Path(args.runtime), auto_build=False).build_runner()
+        data_dir = Path(args.data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
         print(f"运行时: {rt.version} @ {rt.binary}", flush=True)
+        print(f"runner: {'可用' if runner.exists() else '不可用(回退静态头下载)'} @ {runner}", flush=True)
 
         if mode == "offline":
             results, checks = run_offline(rt)
         else:
             cfg = load_config(Path(args.config))
             index = load_index(Path(args.index))
-            results = run_live(args, rt, cfg, index)
+            results = run_live(args, rt, cfg, index, runner, data_dir)
     except VsaRuntimeError as e:
         print(f"💥 框架 ERROR: {e}", file=sys.stderr)
         meta = {"time": datetime.datetime.now().isoformat(), "mode": mode, "platform": platform.platform(),

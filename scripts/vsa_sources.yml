@@ -1,42 +1,218 @@
 # Venera Source Assurance (VSA) 每源测试配置
-#
-# keyword 各源单独配置(避免通用关键词误判); 新源接入时在此追加条目即可。
-# expect: blocked 表示该源存在已定位的运行环境限制, 仅执行加载+搜索两个确定性
-#         阶段后按 BLOCKED 归类, 并把 reason 写进报告(不伪造完整 PASS)。
+# 由 scripts/vsa/calibrate.py 校准生成 + 人工维护(受限于声明式受限源与特殊请求头)
 
 defaults:
-  timeout_stage: 120   # 单阶段(加载/搜索/详情/章节)超时秒数
-  timeout_image: 60    # 单张图片下载超时秒数
-  delay_between_sources: 3.0   # 源间隔, 控制对站点的请求节奏
+  timeout_stage: 120
+  timeout_image: 60
+  delay_between_sources: 3.0
 
 sources:
   copy_manga:
     keyword: "斗罗大陆"
-    image_headers:
-      Referer: "https://www.copymanga.site/"
-    blocked_patterns:
-      - "Expected available in"   # 短期限频 → BLOCKED 而非 FAIL
-      - "破解版本"                # 设备被反盗版风控标记(运行时生成的设备身份在机房环境易被标记)
-      - "請到官網"
-    # 注: 官方 API 搜索对简繁转换的匹配较宽, 返回首条可能与关键词字面不同, 不影响链路验收
 
-  ManHuaGui:
-    keyword: "斗罗大陆"
-    image_headers:
-      Referer: "https://www.manhuagui.com/"
-    # 图片 URL 含中文路径, driver 自动百分号编码; hamreus.com CDN 对部分机房网络不可达时
-    # 会在 image 阶段失败, 属网络限制而非源缺陷, 届时按 FAIL 展示并附环境说明
+  Komiic:
+    entry: explore
+    explore_index: 0
+    expect: blocked
+    blocked_reason: >-
+      正文图片需要源内 onImageLoad 注入动态 Authorization/Cookie(Komiic 图片鉴权),
+      CLI pages 仅返回 URL, driver 静态头无法携带动态 Token; 待薄 Dart runner 方案后转完整验收
 
   manga_dex:
     keyword: "one piece"
     expect: blocked
     blocked_reason: >-
-      运行时兼容性差异: venera 运行时默认以浏览器 UA 请求, 而 api.mangadex.org 对
-      "浏览器 UA + 机房 IP" 返回 bot challenge 页(HTML), 导致 res.json() 抛错;
-      无 UA 或 Dart UA 直连均返回正常 JSON。真实客户端在住宅网络下不受影响。
-      待上游 venera_cli 支持按源注入 UA 后转为完整验收。
+      运行时兼容性差异: venera 运行时默认以浏览器 UA 请求, api.mangadex.org 对
+      "浏览器 UA + 机房 IP" 返回 bot challenge 页(HTML); 真实客户端在住宅网络下不受影响
+    blocked_patterns:
+      - "unexpected token"
+
+  zaimanhua:
+    entry: explore
+    explore_index: 0
+
+  baozi:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      站点主域对运行时 UA/机房 IP 返回 403(镜像域 baozimhcn.com 可用, Layer1 探针走镜像);
+      应用内正常, CLI 环境受限
+    blocked_patterns:
+      - "403" 
+
+  manhuaren:
+    keyword: "海贼王"
+    image_headers:
+      Referer: "https://www.manhuaren.com/"
+
+  ikmmh:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      站点拦截海外/机房网络(403), 仅大陆网络可用
+    blocked_patterns:
+      - "403"
+    # 声明式受限
+
+  ManHuaGui:
+    keyword: "斗罗大陆"
+
+  jm:
+    entry: explore
+    explore_index: 0
+
+  picacg:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      需登录: 签名接口 401, 登录态不属于 CLI 验收范围
+    blocked_patterns:
+      - "401"
+    # 声明式受限
+
+  ehentai:
+    entry: explore
+    explore_index: 0
+
+  nhentai:
+    keyword: "chinese"
+
+  hitomi:
+    entry: explore
+    explore_index: 0
+
+  wnacg:
+    entry: explore
+    explore_index: 0
+
+  shonen_jump_plus:
+    keyword: "SPY×FAMILY"
+
+  comic_walker:
+    entry: explore
+    explore_index: 0
+
+  ccc:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      章节需验证码登录; search 阶段可验证后按声明归类
+    # 声明式受限
+
+  manga51:
+    keyword: "百合"
+
+  rumanhua:
+    entry: explore
+    explore_index: 0
+
+  mkzhan:
+    entry: explore
+    explore_index: 0
+
+  dongmanla:
+    keyword: "妖神记"
+
+  mangabz:
+    entry: explore
+    explore_index: 0
+
+  kanman:
+    entry: explore
+    explore_index: 0
+
+  baihehui:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      搜索需登录, 登录态不属于 CLI 验收范围
+    # 声明式受限
+
+  comick:
+    entry: explore
+    explore_index: 0
+
+  hcomic:
+    entry: explore
+    explore_index: 0
+
+  hot_manga:
+    entry: explore
+    explore_index: 0
+
+  manwaba:
+    entry: explore
+    explore_index: 0
+
+  mxs:
+    entry: explore
+    explore_index: 0
+
+  xmanhua:
+    entry: explore
+    explore_index: 0
+
+  sisimanhua:
+    entry: explore
+    explore_index: 0
+
+  bukamh:
+    entry: explore
+    explore_index: 0
+
+  hipmh:
+    entry: explore
+    explore_index: 0
+
+  wmanhua:
+    keyword: "斗罗"
+
+  shenqimanhua:
+    entry: explore
+    explore_index: 0
 
   manben:
     keyword: "山海逆战"
-    image_headers:
-      Referer: "https://www.manben.com/"
+
+  mhkan:
+    keyword: "斗罗"
+
+  remenmanhua:
+    entry: explore
+    explore_index: 0
+
+  manhuapi:
+    entry: explore
+    explore_index: 0
+
+  dm5:
+    keyword: "山海逆战"
+
+  jisu:
+    keyword: "一拳超人"
+
+  zymk:
+    entry: explore
+    explore_index: 0
+
+  rawkuma:
+    entry: explore
+    explore_index: 0
+
+  jcomic:
+    entry: explore
+    explore_index: 0
+
+  goda:
+    keyword: ""
+    expect: blocked
+    blocked_reason: >-
+      主站搜索被 Cloudflare 拦截, 应用内依赖 WebView 过盾
+    blocked_patterns:
+      - "403"
+      - "cloudflare"
+    # 声明式受限
+
+  ykmh:
+    keyword: "斗罗大陆"
+

@@ -17,8 +17,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_RUNTIME = REPO_ROOT / "work/vsa/runtime/bundle/bin/venera"
+DEFAULT_RUNNER = REPO_ROOT / "work/vsa/runtime/runner/bundle/bin/vsa_runner"
 CLI_SRC = REPO_ROOT / "work/vsa/venera_cli_src"
+RUNNER_SRC = REPO_ROOT / "scripts/vsa_dart"
 CLI_REPO = "https://github.com/venera-app/venera_cli.git"
+DEFAULT_DATA_DIR = REPO_ROOT / "work/vsa/data"
 
 # 与 venera_core _Config.userAgent 保持一致的浏览器 UA(图片下载默认头)
 RUNTIME_UA = (
@@ -77,7 +80,7 @@ class VeneraRuntime:
         )
 
     def build(self) -> Path:
-        """克隆(如缺)并构建 venera_cli; 需要 PATH 中有 dart。"""
+        """克隆(如缺)并构建 venera_cli + VSA Dart runner; 需要 PATH 中有 dart。"""
         if shutil.which("dart") is None:
             raise VsaRuntimeError("构建需要 Dart SDK (PATH 中找不到 dart)")
         if not CLI_SRC.exists():
@@ -94,7 +97,22 @@ class VeneraRuntime:
         )
         if not self.binary.exists():
             raise VsaRuntimeError(f"构建完成但未找到产物: {self.binary}")
+        self.build_runner()
         return self.binary
+
+    def build_runner(self) -> Path:
+        """构建 VSA Dart runner(运行时内取图验证)。"""
+        if shutil.which("dart") is None:
+            raise VsaRuntimeError("构建 runner 需要 Dart SDK (PATH 中找不到 dart)")
+        subprocess.run(["dart", "pub", "get"], cwd=RUNNER_SRC, check=True, capture_output=True)
+        out_dir = DEFAULT_RUNNER.parent.parent.parent  # .../runtime/runner
+        subprocess.run(
+            ["dart", "build", "cli", "--target", "bin/vsa_runner.dart", "--output", str(out_dir)],
+            cwd=RUNNER_SRC, check=True, capture_output=True,
+        )
+        if not DEFAULT_RUNNER.exists():
+            raise VsaRuntimeError(f"runner 构建完成但未找到产物: {DEFAULT_RUNNER}")
+        return DEFAULT_RUNNER
 
     @property
     def version(self) -> str:
@@ -138,6 +156,9 @@ class VeneraRuntime:
 
     def search(self, key: str, keyword: str, page: int = 1, timeout: int = 120) -> CmdResult:
         return self.run([key, "search", "--page", str(page), keyword], timeout=timeout)
+
+    def explore(self, key: str, index: int = 0, timeout: int = 120) -> CmdResult:
+        return self.run([key, "explore", str(index)], timeout=timeout)
 
     def info(self, key: str, comic_id: str, timeout: int = 120) -> CmdResult:
         return self.run([key, "info", comic_id], timeout=timeout)

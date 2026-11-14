@@ -30,6 +30,8 @@ class SourceTestConfig:
     keyword: str = ""
     result_index: int = 0
     ep: str = "last"  # first | last
+    entry: str = "search"  # search | explore(搜索接口失效/无搜索的源用探索页)
+    explore_index: int = 0  # 探索页第几个 tab
     image_headers: dict = field(default_factory=dict)
     image_count: int = 2
     max_page: int = 1
@@ -65,6 +67,8 @@ def load_config(path: Path) -> VsaConfig:
             keyword=str(item.get("keyword", "")),
             result_index=int(item.get("result_index", 0)),
             ep=str(item.get("ep", "last")),
+            entry=str(item.get("entry", "search")),
+            explore_index=int(item.get("explore_index", 0)),
             image_headers=dict(item.get("image_headers") or {}),
             image_count=int(item.get("image_count", 2)),
             max_page=int(item.get("max_page", 1)),

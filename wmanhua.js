@@ -1,7 +1,7 @@
 class WManhuaSource extends ComicSource {
     name = "W漫画"
     key = "wmanhua"
-    version = "1.0.3"
+    version = "1.0.4"
     minAppVersion = "1.6.0"
     url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/wmanhua.js"
 
@@ -70,6 +70,30 @@ class WManhuaSource extends ComicSource {
 
                     if (comics.length > 0) {
                         result.push({ title: title, comics: comics })
+                    }
+                }
+
+                // 2026-11 站点改版: 首页不再有 .card-main 分区, 兜底扫描全部漫画封面锚点
+                if (result.length === 0) {
+                    let comics = []
+                    let seenIds = {}
+                    for (let a of document.querySelectorAll("a[href*='/comic/']")) {
+                        let href = a.attributes["href"] || ""
+                        let m = href.match(/\/comic\/(\d+)\.html/)
+                        if (!m || seenIds[m[1]]) continue
+                        let img = a.querySelector("img")
+                        if (!img) continue
+                        let t = (img.attributes["alt"] || a.attributes["aria-label"] || "").trim()
+                        if (!t) continue
+                        seenIds[m[1]] = true
+                        comics.push(new Comic({
+                            id: m[1],
+                            title: t,
+                            cover: img.attributes["src"] || img.attributes["data-src"] || "",
+                        }))
+                    }
+                    if (comics.length > 0) {
+                        result.push({ title: "W漫画", comics: comics })
                     }
                 }
 
@@ -144,10 +168,24 @@ class WManhuaSource extends ComicSource {
                     let titleElem2 = link.querySelector(".cardtitle, h3")
                     titleText = titleElem2 ? titleElem2.text.trim() : link.text.trim()
                 }
+                if (!titleText && item.localName === "a") {
+                    // 2026-11 改版结构: 标题在 h3, 兜底 aria-label
+                    let h3 = item.querySelector("h3")
+                    titleText = h3 ? h3.text.trim() : (item.attributes["aria-label"] || "").trim()
+                }
 
                 let cover = ""
                 if (img) {
                     cover = img.attributes["data-src"] || img.attributes["src"] || ""
+                }
+                if (!cover && item.localName === "a") {
+                    // 2026-11 改版: 封面在 .thumb 的 background-image
+                    let thumb = item.querySelector(".thumb, div[style*='background-image']")
+                    if (thumb) {
+                        let style = thumb.attributes["style"] || ""
+                        let bm = style.match(/url\(['"]?([^'")]+)['"]?\)/)
+                        if (bm) cover = bm[1]
+                    }
                 }
 
                 if (id && titleText) {
@@ -194,15 +232,21 @@ class WManhuaSource extends ComicSource {
             }
 
             let document = new HtmlDocument(res.body)
-            let items = document.querySelectorAll(".card-content")
+            // 2026-11 站点改版: 搜索结果为 <a class="book" href="/comic/{id}.html">
+            //   <div class="thumb" style="background-image:url(封面)">…</div><h3>标题</h3></a>
+            // 旧 .card-content 结构已不存在; 保留旧解析兜底。
+            let items = document.querySelectorAll("a.book")
+            if (items.length === 0) {
+                items = document.querySelectorAll(".card-content")
+            }
 
             let comics = []
             for (let item of items) {
-                let link = item.querySelector("a")
+                let link = item.querySelector("a") || item
                 let img = item.querySelector("img")
 
                 let id = ""
-                let href = link ? (link.attributes["href"] || "") : ""
+                let href = (item.localName === "a" ? item.attributes["href"] : "") || (link ? (link.attributes["href"] || "") : "")
                 let match = href.match(/\/comic\/(\d+)\.html/)
                 if (match) {
                     id = match[1]
@@ -213,10 +257,24 @@ class WManhuaSource extends ComicSource {
                     let titleElem2 = link.querySelector(".cardtitle, h3")
                     titleText = titleElem2 ? titleElem2.text.trim() : link.text.trim()
                 }
+                if (!titleText && item.localName === "a") {
+                    // 2026-11 改版结构: 标题在 h3, 兜底 aria-label
+                    let h3 = item.querySelector("h3")
+                    titleText = h3 ? h3.text.trim() : (item.attributes["aria-label"] || "").trim()
+                }
 
                 let cover = ""
                 if (img) {
                     cover = img.attributes["data-src"] || img.attributes["src"] || ""
+                }
+                if (!cover && item.localName === "a") {
+                    // 2026-11 改版: 封面在 .thumb 的 background-image
+                    let thumb = item.querySelector(".thumb, div[style*='background-image']")
+                    if (thumb) {
+                        let style = thumb.attributes["style"] || ""
+                        let bm = style.match(/url\(['"]?([^'")]+)['"]?\)/)
+                        if (bm) cover = bm[1]
+                    }
                 }
 
                 if (id && titleText) {
@@ -326,7 +384,8 @@ class WManhuaSource extends ComicSource {
             try {
                 let apiRes = await Network.post(apiUrl, postHeaders, JSON.stringify({}))
                 let apiData = JSON.parse(apiRes.body)
-                if (apiData.code === 0 && apiData.data && apiData.data.chapters && apiData.data.chapters.length > 0) {
+                // 2026-11: 新版接口返回 {data:{chapters:[...]}} 不再带 code 字段, 两种形态都接受
+                if ((apiData.code === 0 || apiData.code === undefined) && apiData.data && apiData.data.chapters && apiData.data.chapters.length > 0) {
                     let chapterList = apiData.data.chapters
                     for (let i = chapterList.length - 1; i >= 0; i--) {
                         let ch = chapterList[i]
@@ -404,7 +463,9 @@ class WManhuaSource extends ComicSource {
         },
 
         loadEp: async (comicId, epId) => {
-            let url = `${this.baseUrl}chapter/${epId}.html`
+            // 2026-11 改版: 章节地址为 /chapter/{contentId}-{chapterId}.html; 兼容只传 chapterId
+            let seg = String(epId).includes("-") ? String(epId) : `${comicId}-${epId}`
+            let url = `${this.baseUrl}chapter/${seg}.html`
             let res = await Network.get(url, this.headers)
             if (res.status !== 200) {
                 throw `Invalid status code: ${res.status}`
@@ -415,15 +476,31 @@ class WManhuaSource extends ComicSource {
 
             let html = res.body
 
-            let numMatch = html.match(/var\s+num\s*=\s*eval\s*\(\s*["'](\d+)["']\s*\)/)
-            let pasdMatch = html.match(/var\s+pasd\s*=\s*["']([^"']+)["']/)
+            // 新版阅读器: 内嵌脚本按 imgBaseUrl + 序号 .webp 动态构建图片
+            // imgBaseUrl 源码形如 'https://…/mh/{封面hash}/' + ('{章节path}' || '…') + '/', 为字符串拼接
+            let totalMatch = html.match(/var\s+totalPages\s*=\s*parseInt\('(\d+)'\)/)
+            let baseMatch = html.match(/var\s+imgBaseUrl\s*=\s*'([^']+)'\s*\+\s*\('([^']+)'/)
+            if (totalMatch && baseMatch) {
+                let total = parseInt(totalMatch[1])
+                if (total > 0 && total < 500) {
+                    let imgBase = baseMatch[1] + baseMatch[2] + "/"
+                    for (let i = 1; i <= total; i++) {
+                        images.push(imgBase + i + ".webp")
+                    }
+                }
+            }
 
-            if (numMatch && pasdMatch) {
-                let num = parseInt(numMatch[1])
-                let pasd = pasdMatch[1]
-                if (num > 0 && pasd) {
-                    for (let i = 1; i <= num; i++) {
-                        images.push(pasd + i + ".webp")
+            if (images.length === 0) {
+                let numMatch = html.match(/var\s+num\s*=\s*eval\s*\(\s*["'](\d+)["']\s*\)/)
+                let pasdMatch = html.match(/var\s+pasd\s*=\s*["']([^"']+)["']/)
+
+                if (numMatch && pasdMatch) {
+                    let num = parseInt(numMatch[1])
+                    let pasd = pasdMatch[1]
+                    if (num > 0 && pasd) {
+                        for (let i = 1; i <= num; i++) {
+                            images.push(pasd + i + ".webp")
+                        }
                     }
                 }
             }

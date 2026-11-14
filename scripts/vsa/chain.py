@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 import urllib.parse
 import urllib.request
@@ -46,7 +47,10 @@ def identify_image(head: bytes) -> str:
         return "WebP"
     if head[:4] == b"GIF8":
         return "GIF"
-    if head[:4] in (b"\x00\x00\x00\x1c", b"\x00\x00\x00\x20"):
+    if head[:4] in (b"\x00\x00\x00\x1c", b"\x00\x00\x00\x20", b"\x00\x00\x00\x18", b"\x00\x00\x00\x20"):
+        return "AVIF"
+    # ISOBMFF ftyp box: [size(4)][ftyp(4)] — AVIF/HEIF 容器
+    if len(head) >= 12 and head[4:8] == b"ftyp":
         return "AVIF"
     if b"<html" in head[:200].lower() or b"<!doctype" in head[:200].lower():
         return "HTML(非图片)"
@@ -83,6 +87,27 @@ def _sanitize_url(url: str, limit: int = 100) -> str:
     return u[:limit]
 
 
+def verify_images_via_runner(runner: Path, js_path: Path, key: str, comic_id: str, ep_id: str,
+                             data_dir: Path, count: int, timeout: int) -> dict:
+    """通过薄 Dart runner 在运行时内取图: 调源自身 loadEp + onImageLoad 动态头后实抓字节。"""
+    import subprocess as sp
+    try:
+        proc = sp.run(
+            [str(runner), "--data", str(data_dir), "--load", str(js_path),
+             "--key", key, "--comic-id", str(comic_id), "--ep-id", str(ep_id)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except sp.TimeoutExpired:
+        return {"ok": False, "error": f"runner timeout after {timeout}s"}
+    try:
+        payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return {"ok": False, "error": f"runner 输出异常: {proc.stdout[:100]!r} {proc.stderr[:120]!r}"}
+    if not payload.get("ok"):
+        return {"ok": False, "error": payload.get("error", "runner failed")}
+    return payload
+
+
 def _download_head(url: str, headers: dict, timeout: int) -> tuple[int, bytes, str]:
     """下载图片头部字节并识别格式。中文路径自动百分号编码。"""
     ctx = ssl.create_default_context()
@@ -109,7 +134,8 @@ def _download_head(url: str, headers: dict, timeout: int) -> tuple[int, bytes, s
 
 
 def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
-               vsa_cfg: VsaConfig, index_meta: dict | None) -> SourceResult:
+               vsa_cfg: VsaConfig, index_meta: dict | None,
+               runner_binary: Path | None = None, data_dir: Path | None = None) -> SourceResult:
     """对单个源执行完整验收链路。任何阶段失败立即定态返回。"""
     res = SourceResult(
         key=cfg.key,
@@ -162,8 +188,15 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
         return res
     res.add("metadata", STATE_PASS, f"{meta['key']} v{meta['version']} 与索引一致")
 
-    # ---- search ----
-    r = rt.search(cfg.key, cfg.keyword, cfg.max_page, vsa_cfg.timeout_stage)
+    # ---- search(或 explore 入口: 搜索接口失效/无搜索的源) ----
+    if cfg.entry == "explore":
+        r = rt.explore(cfg.key, cfg.explore_index, vsa_cfg.timeout_stage)
+        stage = "search"  # 链路语义相同: 列表入口产出漫画条目
+        label = f"explore[{cfg.explore_index}]"
+    else:
+        r = rt.search(cfg.key, cfg.keyword, cfg.max_page, vsa_cfg.timeout_stage)
+        stage = "search"
+        label = f"search '{cfg.keyword}'"
     if not r.ok:
         state = STATE_FAIL
         detail = r.err_brief
@@ -172,37 +205,72 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
                 state = STATE_BLOCKED
                 detail = f"命中声明式受限模式 '{pat}': {detail}"
                 break
-        res.add("search", state, detail, r.elapsed_ms)
+        res.add(stage, state, f"{label}: {detail}", r.elapsed_ms)
         res.state = state
         return res
     payload = r.json
     comics = (payload or {}).get("data") or []
+    # 兼容 multiPartPage explore 结构: data = [{title, comics: [...]}, ...]
+    if comics and isinstance(comics[0], dict) and "comics" in comics[0]:
+        flat = []
+        for section in comics:
+            flat.extend(section.get("comics") or [])
+        comics = flat
     if not isinstance(comics, list) or not comics:
-        res.add("search", STATE_FAIL, f"搜索无结果或结构异常: {str(payload)[:120]}", r.elapsed_ms)
+        res.add(stage, STATE_FAIL, f"{label} 无结果或结构异常: {str(payload)[:120]}", r.elapsed_ms)
         res.state = STATE_FAIL
         return res
     idx = min(cfg.result_index, len(comics) - 1)
     target = comics[idx]
     comic_id = str(target.get("id", ""))
     if not comic_id:
-        res.add("search", STATE_FAIL, f"结果第 {idx} 条缺 id", r.elapsed_ms)
+        res.add(stage, STATE_FAIL, f"结果第 {idx} 条缺 id", r.elapsed_ms)
         res.state = STATE_FAIL
         return res
-    res.add("search", STATE_PASS,
-            f"{len(comics)} 条结果, 取[{idx}] {str(target.get('title', ''))[:40]} (id={comic_id[:40]})",
+    res.add(stage, STATE_PASS,
+            f"{label} {len(comics)} 条结果, 取[{idx}] {str(target.get('title', ''))[:40]} (id={comic_id[:40]})",
             r.elapsed_ms)
 
+    # 记录候选条目(条目方差时 info 空章节可换下一条目重试)
+    alt_candidates = []
+    for j, item in enumerate(comics):
+        if j == idx:
+            continue
+        cid2 = str(item.get("id", ""))
+        if cid2 and cid2 != comic_id:
+            alt_candidates.append((cid2, str(item.get("title", ""))[:30]))
+    alt_candidates = alt_candidates[:2]
+
     # ---- info ----
-    r = rt.info(cfg.key, comic_id, vsa_cfg.timeout_stage)
-    if not r.ok:
+    info_attempts = [(comic_id, str(target.get("title", ""))[:30])] + alt_candidates
+    r = None
+    payload = None
+    data = None
+    chapters = None
+    info_detail_parts = []
+    for cand_id, cand_title in info_attempts:
+        r = rt.info(cfg.key, cand_id, vsa_cfg.timeout_stage)
+        if not r.ok:
+            info_detail_parts.append(f"{cand_title}: {r.err_brief[:50]}")
+            continue
+        payload = r.json
+        data = (payload or {}).get("data") or {}
+        chapters = data.get("chapters") or {}
+        if isinstance(chapters, dict) and chapters:
+            comic_id = cand_id
+            break
+        info_detail_parts.append(f"{cand_title}: 章节为空")
+        chapters = None
+    if r is None or chapters is None or not isinstance(chapters, dict) or not chapters:
         state = STATE_FAIL
-        detail = r.err_brief
-        for pat in cfg.blocked_patterns:
-            if pat.lower() in r.stderr.lower():
-                state = STATE_BLOCKED
-                detail = f"命中声明式受限模式 '{pat}': {detail}"
-                break
-        res.add("info", state, detail, r.elapsed_ms)
+        detail = "; ".join(info_detail_parts) or f"章节数据缺失: {str(payload)[:100]}"
+        if r is not None:
+            for pat in cfg.blocked_patterns:
+                if pat.lower() in r.stderr.lower():
+                    state = STATE_BLOCKED
+                    detail = f"命中声明式受限模式 '{pat}': {detail}"
+                    break
+        res.add("info", state, detail, r.elapsed_ms if r else 0)
         res.state = state
         return res
     payload = r.json
@@ -255,6 +323,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     r = None
     images = []
     attempts = []
+    used_ep_id = None
     for cand_id, cand_label in candidates:
         r = rt.pages(cfg.key, comic_id, str(cand_id), vsa_cfg.timeout_stage)
         if r.ok:
@@ -262,6 +331,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             imgs = (payload or {}).get("data") or []
             images = [u for u in imgs if isinstance(u, str) and u.startswith("http")]
             if images:
+                used_ep_id = cand_id
                 break
             attempts.append(f"{cand_label}: 空图片列表")
         else:
@@ -282,17 +352,41 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     res.add("pages", STATE_PASS, f"{len(images)} 张图 (首图 {_sanitize_url(images[0])}){suffix}", r.elapsed_ms)
 
     # ---- image 字节抽样 ----
+    # 优先薄 Dart runner(运行时内 onImageLoad 动态头); 不可用则回退静态头下载
     img_state = STATE_PASS
     img_details = []
-    for i, url in enumerate(images[: cfg.image_count]):
-        code, head, err = _download_head(url, cfg.image_headers, vsa_cfg.timeout_image)
-        kind = identify_image(head)
-        ok = code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF")
-        img_details.append(f"图{i + 1}: HTTP {code} {kind}" + (f" ({err})" if err else ""))
-        if not ok:
+    runner_payload = None
+    if runner_binary is not None and runner_binary.exists():
+        runner_payload = verify_images_via_runner(
+            runner_binary, js_path, cfg.key, comic_id, str(used_ep_id),
+            data_dir or (Path("/tmp") / "vsa_data"), 1, vsa_cfg.timeout_image + 60)
+        if runner_payload.get("ok") and runner_payload.get("verify", {}).get("status") == 200:
+            v = runner_payload["verify"]
+            magic = v.get("magic", "")
+            if "HTML" in magic or magic.startswith("未知"):
+                img_details.append(f"图1: HTTP 200 {magic} ({v.get('size')}B)")
+                img_state = STATE_FAIL
+            else:
+                img_details.append(f"图1: HTTP 200 {magic} ({v.get('size')}B, onImageLoad 动态头: {','.join(v.get('headers_used', []))[:60]})")
+        elif runner_payload.get("ok"):
+            v = runner_payload["verify"]
+            img_details.append(f"图1: HTTP {v.get('status')} {v.get('magic')}")
             img_state = STATE_FAIL
-            break
-        time.sleep(0.5)
+        else:
+            # runner 失败(含 loadEp 阶段) → 记录并回退静态头
+            img_details.append(f"runner: {runner_payload.get('error', '')[:80]}")
+            img_state = STATE_FAIL
+
+    if img_state == STATE_PASS and not img_details:
+        for i, url in enumerate(images[: cfg.image_count]):
+            code, head, err = _download_head(url, cfg.image_headers, vsa_cfg.timeout_image)
+            kind = identify_image(head)
+            ok = code == 200 and kind in ("JPEG", "PNG", "WebP", "GIF", "AVIF")
+            img_details.append(f"图{i + 1}: HTTP {code} {kind}" + (f" ({err})" if err else ""))
+            if not ok:
+                img_state = STATE_FAIL
+                break
+            time.sleep(0.5)
     res.add("image", img_state, "; ".join(img_details))
     res.state = STATE_PASS if img_state == STATE_PASS else STATE_FAIL
     if res.state == STATE_PASS:

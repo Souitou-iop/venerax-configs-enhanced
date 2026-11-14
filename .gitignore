@@ -8,3 +8,5 @@ work/e2e_run/
 
 # VSA 运行时构建产物与报告(work/vsa/ 下源码克隆/二进制/fixture/报告不入库)
 work/vsa/
+scripts/vsa_dart/.dart_tool/
+scripts/vsa_dart/build/

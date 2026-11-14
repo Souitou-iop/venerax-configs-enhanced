@@ -7,7 +7,7 @@
 class Dongmanla extends ComicSource {
   name = "动漫啦";
   key = "dongmanla";
-  version = "1.0.0";
+  version = "1.0.1";
   minAppVersion = "1.0.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/dongmanla.js";
 
@@ -52,6 +52,32 @@ class Dongmanla extends ComicSource {
           cover: Dongmanla.abs(cover),
         })
       );
+    }
+    // 2026-11 站点改版(Tailwind 模板): 列表/搜索页不再有 .cy_list_mh,
+    // 条目为 <a href="/manhua/detail/{id}/" title="…"><img data-cover …></a>
+    if (comics.length === 0) {
+      for (let a of document.querySelectorAll("a[href*='manhua/detail']")) {
+        let href = a.attributes["href"] || "";
+        let m = href.match(/\/manhua\/detail\/(\d+)/);
+        if (!m || seen[m[1]]) continue;
+        let title = (a.attributes["title"] || "").trim();
+        if (!title) {
+          let img = a.querySelector("img");
+          if (img) title = (img.attributes["alt"] || "").trim();
+        }
+        if (!title) continue;
+        seen[m[1]] = true;
+        let img = a.querySelector("img");
+        let cover = "";
+        if (img) cover = img.attributes["data-cover"] || img.attributes["data-src"] || img.attributes["src"] || "";
+        comics.push(
+          new Comic({
+            id: m[1],
+            title,
+            cover: Dongmanla.abs(cover),
+          })
+        );
+      }
     }
     return comics;
   }
@@ -126,6 +152,16 @@ class Dongmanla extends ComicSource {
         let name = (a.text || "").trim();
         if (!name) continue;
         items.push([m[1], name]);
+      }
+      // 2026-11 站点改版(Tailwind): 章节网格 #chapterList 内 a[href=/manhua/chapter/{cid}/{ep}/]
+      if (items.length === 0) {
+        for (let a of document.querySelectorAll("#chapterList a, div[id='chapterList'] a")) {
+          let href = a.attributes["href"] || "";
+          let m = href.match(/\/manhua\/chapter\/\d+\/(\d+)/);
+          if (!m) continue;
+          let name = (a.text || "").trim();
+          items.push([m[1], name]);
+        }
       }
       // DOM often newest-first
       items.reverse();
