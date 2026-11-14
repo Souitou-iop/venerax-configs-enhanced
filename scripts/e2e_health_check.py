@@ -1589,19 +1589,13 @@ def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
 
 
 def write_readme_section(readme_section):
-    path = os.path.join(ROOT, 'README.md')
-    text = Path(path).read_text(encoding='utf-8')
-    start = "## 🧭 各漫画源最佳线路与网络推荐指南 (Recommended Lines)"
-    end = "## 🛠️ 修复与更新日志 (Changelog)"
-    a, b = text.find(start), text.find(end)
-    if a < 0 or b < 0 or a >= b:
-        print('[WARN] README markers missing; real README was not modified')
-        return False
-    section = readme_section.rstrip()
-    if section.endswith(end):
-        section = section[:-len(end)].rstrip()
-    Path(path).write_text(text[:a] + section + '\n\n' + text[b:], encoding='utf-8')
-    return True
+    """探针快照不再写入 README(即时态数据留在 GH Step Summary 与 artifacts)。
+
+    保留本函数占位是为了兼容 --production/--write-readme 的调用方与日志语义;
+    返回 False 表示本轮 README 无变化, workflow 的提交步骤会自然跳过。
+    """
+    print('[Step 5] README 不再承载探针快照(2026-11-14 起), 结果见 GH Step Summary 与 artifacts')
+    return False
 
 
 def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
@@ -1771,11 +1765,9 @@ def main():
         f.write(readme_section)
     readme_warn = None
     if WRITE_README:
-        if write_readme_section(readme_section):
+        # README 自 2026-11-14 起不再承载探针快照; 本调用为兼容占位, 恒返回 False
+        if write_readme_section(readme_section):  # pragma: no cover
             print('[Step 5] README.md 已更新')
-        else:
-            readme_warn = ("README 起止标记缺失或错位，本轮推荐指南区块未替换；"
-                           "探针结果本身正常，请检查 README 两个区块标题是否被人工改动")
     else:
         print(f"[Step 5] README 区块预览 → {OUT_DIR}/README_section_preview.md (真实 README 未改动)")
 

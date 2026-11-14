@@ -171,24 +171,6 @@ jobs:
             echo "ℹ️ No recovery this run; outstanding=$OUTSTANDING."
           fi
 
-      - name: Commit and Push README Updates
-        if: steps.run_probe.outcome == 'success'
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          if ! git diff --quiet README.md; then
-            echo "📝 README.md updated with latest benchmark data, committing..."
-            git add README.md
-            git commit -m "docs: 自动同步最新双网络环境实测延迟数据 [skip ci]"
-            # Rebase onto remote in case it moved during the run window; normally a no-op
-            # since this job is the only writer to this region of history.
-            git pull --rebase origin main
-            git push origin main
-          else
-            echo "✅ README.md latency data unchanged, skipping commit."
-          fi
-
       - name: Save probe runtime state
         if: always()
         uses: actions/cache/save@v4
