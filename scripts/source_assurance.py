@@ -368,7 +368,8 @@ def main():
         if not runner_binary.exists() and args.build and Path(args.runtime).exists():
             from vsa.runtime import VeneraRuntime as _R
             _R(Path(args.runtime), auto_build=False).build_runner()
-        runner_ctx = RunnerContext(binary=runner_binary if runner_binary.exists() else None,
+        # 严格模式下即使缺失也传入路径(错误信息要能指向真实配置路径)
+        runner_ctx = RunnerContext(binary=runner_binary,
                                    data_dir=Path(args.data_dir), strict=strict)
         runner_ctx.data_dir.mkdir(parents=True, exist_ok=True)
         print(f"运行时: {rt.version} @ {rt.binary}", flush=True)
