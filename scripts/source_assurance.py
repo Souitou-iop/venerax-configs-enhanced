@@ -36,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from vsa.chain import (  # noqa: E402
+    STATE_BLOCKED,
     STATE_ERROR,
     STATE_FAIL,
     STATE_PASS,
@@ -231,6 +232,16 @@ def run_offline(rt: VeneraRuntime, runner_ctx: RunnerContext) -> tuple[list[Sour
              "neg-ssrf: 返回内网/元数据 URL 须被护栏拒绝"),
             ("vsa_fixture", cfg_for("vsa_fixture", keyword="vsa", result_index=7), STATE_PASS,
              "count-mismatch: 可用样本少于请求时如实标注"),
+            ("vsa_fixture", cfg_for("vsa_fixture", keyword="vsa", result_index=8,
+                                    blocked_patterns=[{"status": 403}]), STATE_FAIL,
+             "neg-pages-empty: 空 pages + 声明受限 → 结构化 FAIL 不被 BLOCKED 掩盖"),
+            ("vsa_fixture", cfg_for("vsa_fixture", keyword="vsa", result_index=3,
+                                    blocked_patterns=[{"status": 404}]), STATE_BLOCKED,
+             "图片 404 + 声明 status:404 → BLOCKED(证据=http_status)"),
+            ("vsa_fixture", cfg_for("vsa_fixture", keyword="vsa", result_index=9), STATE_PASS,
+             "mix-decode: JPEG 解码 + AVIF 字节可信未解码 → level=runtime_image_bytes",
+             "runtime_image_bytes"),
+
             ("vsa_broken", cfg_for("vsa_broken", keyword="vsa"), STATE_FAIL,
              "语法错误须加载失败"),
             ("vsa_badsearch", cfg_for("vsa_badsearch", keyword="vsa"), STATE_FAIL,
@@ -241,7 +252,9 @@ def run_offline(rt: VeneraRuntime, runner_ctx: RunnerContext) -> tuple[list[Sour
                                             expect="blocked", blocked_patterns=["403"]), STATE_FAIL,
              "受限声明 + JS 错误 → FAIL(不被 BLOCKED 掩盖)"),
         ]
-        for key, scfg, expect_state, desc in cases:
+        for case in cases:
+            key, scfg, expect_state, desc = case[:4]
+            expected_level = case[4] if len(case) > 4 else None
             js_path = files[key]
             try:
                 res = run_source(rt, js_path, scfg, offline_cfg, None, runner=runner_ctx)
@@ -253,9 +266,17 @@ def run_offline(rt: VeneraRuntime, runner_ctx: RunnerContext) -> tuple[list[Sour
                 res.detail = f"{type(e).__name__}: {e}"
             results.append(res)
             ok = res.state == expect_state
-            checks.append({"case": desc, "expect": expect_state, "actual": res.state, "ok": ok})
+            level_ok = True
+            if ok and expected_level:
+                level_ok = res.verification_level == expected_level
+                if not level_ok:
+                    ok = False
+            checks.append({"case": desc, "expect": expect_state, "actual": res.state,
+                           "expect_level": expected_level, "actual_level": res.verification_level,
+                           "ok": ok})
             mark = "✅" if ok else "❌"
-            print(f"  {mark} [{key}#{scfg.result_index}] 期望 {expect_state}, 实际 {res.state} — {desc}", flush=True)
+            level_note = f" level={res.verification_level}" if expected_level else ""
+            print(f"  {mark} [{key}#{scfg.result_index}] 期望 {expect_state}, 实际 {res.state}{level_note} — {desc}", flush=True)
 
         # 严格模式: Runner 缺失 → ERROR, 不得降级 PASS
         missing_runner = RunnerContext(binary=Path("/nonexistent/vsa_runner"),
@@ -381,6 +402,10 @@ def main():
         else:
             cfg = load_config(Path(args.config))
             index = load_index(Path(args.index))
+            # P0-A: live 模式强制禁用本地地址例外(仅离线 fixture 可用); YAML 声明无效则警告
+            if cfg.allow_local:
+                print("⚠️ vsa_sources.yml 声明了 allow_local, live 模式下强制忽略(SDSP 安全护栏)", flush=True)
+                cfg.allow_local = False
             # 严格模式先做覆盖率门槛(静默漏测必须先暴露)
             problems, ok = check_coverage(index, cfg, REPO_ROOT)
             if not ok:
@@ -394,12 +419,16 @@ def main():
         print(f"💥 框架 ERROR: {e}", file=sys.stderr)
         meta = {"time": datetime.datetime.now().isoformat(), "mode": mode, "platform": platform.platform(),
                 "runtime": str(args.runtime), "framework_error": str(e), "schema_version": 2}
-        report = build_report(meta, results)
-        report["self_test"] = checks
+        report = build_report(meta, results, checks=checks or None)
         write_json(report, out_dir / f"vsa-{mode}-{ts}.json")
         sys.exit(2)
 
     self_test_failed = args.self_test and any(not c["ok"] for c in checks)
+    # P1-B: build id 单一事实来源 —— CI 由工作流注入(runtime_build_id env),
+    # 本地回退到 CLI_SRC 的 git rev;同时记录 source_commit 与配置哈希
+    import hashlib
+    import os
+    config_hash = hashlib.sha256(Path(args.config).read_bytes()).hexdigest()[:16]
     meta = {
         "schema_version": 2,
         "time": datetime.datetime.now().isoformat(),
@@ -407,25 +436,28 @@ def main():
         "platform": platform.platform(),
         "runtime": rt.version,
         "runtime_path": str(rt.binary),
-        "runtime_build_id": VeneraRuntime.build_id(CLI_SRC) if CLI_SRC.exists() else "prebuilt",
+        "runtime_build_id": os.environ.get("runtime_build_id")
+        or (VeneraRuntime.build_id(CLI_SRC) if CLI_SRC.exists()
+            else (Path(REPO_ROOT / "scripts/vsa/RUNTIME_PIN").read_text().strip()
+                  if Path(REPO_ROOT / "scripts/vsa/RUNTIME_PIN").exists() else "unknown")),
         "runner_build_id": VeneraRuntime.build_id(RUNNER_SRC),
         "runner_path": str(args.runner),
+        "source_commit": VeneraRuntime.build_id(REPO_ROOT),
+        "config_hash": config_hash,
         "strict": strict,
     }
-    report = build_report(meta, results)
-    if checks:
-        report["self_test"] = checks
-        report["self_test_passed"] = all(c["ok"] for c in checks)
+    report = build_report(meta, results, checks=checks or None)
     json_path = write_json(report, out_dir / f"vsa-{mode}-{ts}.json")
     md_path = write_markdown(report, out_dir / f"vsa-{mode}-{ts}.md")
     write_github_summary(md_path)
     print(f"\n报告: {json_path}\n      {md_path}")
 
     if args.self_test:
+        st = report.get("self_test", {})
         if self_test_failed:
-            print("❌ 自检存在未通过的判定路径", file=sys.stderr)
+            print(f"❌ 自检存在未通过的判定路径({st.get('passed', 0)}/{st.get('total', 0)})", file=sys.stderr)
             sys.exit(1)
-        print("✅ 自检全部判定路径符合预期")
+        print(f"✅ 自检全部判定路径符合预期({st.get('passed', 0)}/{st.get('total', 0)} 用例)")
         sys.exit(0)
 
     summary = report["summary"]

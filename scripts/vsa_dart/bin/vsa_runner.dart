@@ -6,21 +6,22 @@
 //   3. 对抽样图片逐张调用源自身的 getImageLoadingConfig(即 JS onImageLoad)获取动态请求头
 //   4. 用该请求头实际下载样本图片, 输出 magic bytes / 字节数 / 解码结果 / sha256
 //
-// 这补齐了 CLI `pages` 只返回 URL、无法携带 onImageLoad 动态头的缺口。
+// 出站安全(P0-A):
+//   - 自建 Dio 注入 venera_core: JS 网络桥与本 runner 共享同一实例与 cookie jar;
+//   - 拦截器对 **JS 网络桥的全部初始请求** 做 URL/DNS 护栏;
+//   - 本 runner 的图片抓取 followRedirects=false + 手动逐跳跟随, 每一跳重走护栏;
+//   - 已知残余风险(如实声明, 详见 docs/vsa.md): DNS 校验与实际连接之间的 TOCTOU 窗口;
+//     Dio 层重定向对 JS 桥请求仍由库内部跟随(初始 URL 已护栏, 跳转目标未重校验);
+//     全链路出站隔离需进程/网络层沙箱, 本轮未实现。
 //
 // 用法:
 //   dart run bin/vsa_runner.dart --data <dir> --load <source.js> \
 //     --key <sourceKey> --comic-id <id> --ep-id <id> [--count n] [--allow-local]
-//
-// 输出 JSON(单行):
-//   {"ok": true, "requested_image_count": n, "available_image_count": m,
-//    "attempted_image_count": k, "verified_image_count": j,
-//    "image_urls": [...], "samples": [{...}], ...}
-//   {"ok": false, "error": "...", "error_code": "..."}
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:image/image.dart' as imglib;
@@ -50,9 +51,40 @@ String identifyImage(Uint8List head) {
   return '未知(${head.take(8).map((e) => e.toRadixString(16).padLeft(2, '0')).join()})';
 }
 
-/// URL 安全护栏: 仅允许 http/https 公网目标; 阻止内网/环回/云元数据地址(SSRF)。
-/// [allowLocal] 仅供离线 Fixture 模式(本地 127.0.0.1 服务)使用。
-String? guardUrl(String url, {bool allowLocal = false}) {
+/// 判断单个 IP 地址是否属于禁止访问段(环回/私网/链路本地/未指定/CGNAT)。
+/// 覆盖 IPv4、IPv6(含 ULA fc00::/7、link-local fe80::/10、loopback ::1)与
+/// IPv4-mapped IPv6(::ffff:a.b.c.d)。
+bool isForbiddenIp(InternetAddress addr) {
+  if (addr.isLoopback || addr.isLinkLocal || addr.isMulticast) {
+    return true;
+  }
+  final bytes = addr.rawAddress;
+  if (bytes.length == 4) {
+    final a = bytes[0], b = bytes[1];
+    if (a == 10 || a == 127 || a == 0) return true;
+    if (a == 172 && b >= 16 && b <= 31) return true;
+    if (a == 192 && b == 168) return true;
+    if (a == 169 && b == 254) return true;
+    if (a == 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  if (bytes.length == 16) {
+    // IPv4-mapped ::ffff:0:0/96 → 按内嵌 IPv4 重新判定
+    if (bytes[10] == 0xff && bytes[11] == 0xff) {
+      final v4 = InternetAddress.fromRawAddress(
+          Uint8List.fromList(bytes.sublist(12)), type: InternetAddressType.IPv4);
+      return isForbiddenIp(v4);
+    }
+    if (bytes[0] == 0xfc || bytes[0] == 0xfd) return true; // ULA
+    if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80) return true; // link-local
+    if (bytes.every((e) => e == 0)) return true; // :: 未指定地址
+    return false;
+  }
+  return false;
+}
+
+/// URL 字符串护栏: scheme/host/userinfo。
+String? guardUrl(String url) {
   Uri uri;
   try {
     uri = Uri.parse(url);
@@ -65,30 +97,79 @@ String? guardUrl(String url, {bool allowLocal = false}) {
   if (uri.host.isEmpty) {
     return 'URL 缺少主机名';
   }
-  final host = uri.host.toLowerCase();
-  final isLocal = host == 'localhost' || host == '127.0.0.1' || host == '::1' || host.endsWith('.local');
-  if (isLocal && !allowLocal) {
-    return '拒绝访问本地地址: $host';
+  if (uri.userInfo.isNotEmpty) {
+    return 'URL 携带用户信息(禁止)';
   }
-  // 云元数据地址一律拒绝
-  if (host == '169.254.169.254' || host == 'metadata.google.internal') {
+  return null;
+}
+
+/// DNS/主机护栏: 校验主机名解析结果的每一个 IP(含 IPv6/mapped)。
+/// 返回 null 表示通过; 否则返回脱敏拒绝原因。
+Future<String?> guardHost(String host, {bool allowLocal = false}) async {
+  final h = host.toLowerCase();
+  if (h == '169.254.169.254' || h == 'metadata.google.internal') {
     return '拒绝访问云元数据地址';
   }
-  // 解析主机为 IP 时拒绝私网段(10/172.16-31/192.168/169.254/0.0.0.0)
-  final ip = Uri.tryParse('http://$host')?.host ?? host;
-  final ipPattern = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
-  if (ipPattern.hasMatch(ip)) {
-    final parts = ip.split('.').map((e) => int.tryParse(e) ?? -1).toList();
-    final private = (parts[0] == 10) ||
-        (parts[0] == 192 && parts[1] == 168) ||
-        (parts[0] == 169 && parts[1] == 254) ||
-        (parts[0] == 172 && parts[1] >= 16 && parts[1] <= 31) ||
-        parts.every((e) => e == 0);
-    if (private && !allowLocal) {
-      return '拒绝访问私网地址: $ip';
+  if (h == 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) {
+    if (!allowLocal) return '拒绝访问本地/内部主机名: $host';
+    return null;
+  }
+  final literal = InternetAddress.tryParse(host);
+  if (literal != null) {
+    if (isForbiddenIp(literal) && !allowLocal) {
+      return '拒绝访问私网/环回地址: $host';
+    }
+    return null;
+  }
+  final addresses = await InternetAddress.lookup(host, type: InternetAddressType.any);
+  if (addresses.isEmpty) {
+    return 'DNS 解析无结果: $host';
+  }
+  for (final addr in addresses) {
+    if (isForbiddenIp(addr) && !allowLocal) {
+      return 'DNS 解析命中禁段地址: $host → ${addr.address}';
     }
   }
   return null;
+}
+
+/// 带 URL/DNS 护栏的 GET: 手动逐跳跟随重定向, 每一跳重走护栏。
+Future<Response<List<int>>> guardedGet(
+    Dio dio, String url, Map<String, String> headers,
+    {bool allowLocal = false, int maxHops = 5}) async {
+  var current = url;
+  for (var hop = 0; hop <= maxHops; hop++) {
+    final urlErr = guardUrl(current);
+    if (urlErr != null) {
+      throw DioException.connectionError(
+          requestOptions: RequestOptions(path: current), reason: 'URL_GUARD: $urlErr');
+    }
+    final hostErr = await guardHost(Uri.parse(current).host, allowLocal: allowLocal);
+    if (hostErr != null) {
+      throw DioException.connectionError(
+          requestOptions: RequestOptions(path: current), reason: 'DNS_GUARD: $hostErr');
+    }
+    final response = await dio.get<List<int>>(
+      current,
+      options: Options(
+        headers: headers,
+        responseType: ResponseType.bytes,
+        validateStatus: (_) => true,
+        followRedirects: false,
+        maxRedirects: 0,
+      ),
+    );
+    final code = response.statusCode ?? 0;
+    if (code >= 300 && code < 400 && code != 304) {
+      final location = response.headers.value('location');
+      if (location == null) return response;
+      current = Uri.parse(current).resolve(location).toString();
+      continue;
+    }
+    return response;
+  }
+  throw DioException.connectionError(
+      requestOptions: RequestOptions(path: url), reason: 'URL_GUARD: 重定向次数超过 $maxHops');
 }
 
 Future<void> main(List<String> arguments) async {
@@ -129,8 +210,26 @@ Future<void> main(List<String> arguments) async {
     if (!await dataDir.exists()) {
       await dataDir.create(recursive: true);
     }
-    // 自建 Dio 并交给 venera_core: JS 网络桥与本 runner 的图片抓取共享同一 cookie jar
+    // 自建 Dio 注入 venera_core: JS 网络桥与本 runner 共享同一实例/cookie jar。
+    // 拦截器覆盖 **JS 网络桥的全部初始请求**(URL + DNS 护栏)。
     final dio = Dio();
+    dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final err = guardUrl(options.uri.toString());
+        if (err != null) {
+          handler.reject(DioException.connectionError(
+              requestOptions: options, reason: 'URL_GUARD: $err'));
+          return;
+        }
+        final hostErr = await guardHost(options.uri.host, allowLocal: allowLocal);
+        if (hostErr != null) {
+          handler.reject(DioException.connectionError(
+              requestOptions: options, reason: 'DNS_GUARD: $hostErr'));
+          return;
+        }
+        handler.next(options);
+      },
+    ));
     await ComicSourceManager().init(
       dataPath: dataPath,
       appVersion: '2.0.0',
@@ -138,7 +237,6 @@ Future<void> main(List<String> arguments) async {
     );
     final source = await ComicSourceManager().installFromFile(loadFile, replace: true);
     if (source.key != key) {
-      // key 与参数不一致时以实际加载为准记录
       out['loaded_key'] = source.key;
     }
     final target = ComicSourceManager().find(key) ?? source;
@@ -170,7 +268,8 @@ Future<void> main(List<String> arguments) async {
     final samples = images.take(requested).toList();
     final sampleResults = <Map<String, dynamic>>[];
     var verified = 0;
-    var decodeSupported = 0;
+    var decoded = 0;
+    var decodeUnsupported = 0;
     for (var i = 0; i < samples.length; i++) {
       final imageUrl = samples[i];
       final sample = <String, dynamic>{'index': i};
@@ -196,81 +295,64 @@ Future<void> main(List<String> arguments) async {
         headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
             '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
       }
-      final guard = guardUrl(fetchUrl, allowLocal: allowLocal);
-      if (guard != null) {
-        sample.addAll({
-          'url': fetchUrl.split('?').first,
-          'status': 'BLOCKED',
-          'magic': 'SSRF',
-          'error': guard,
-          'verified': false,
-        });
-        sampleResults.add(sample);
-        break; // 安全护栏命中, 不继续抓取
-      }
       try {
-        final response = await dio.get<List<int>>(
-          fetchUrl,
-          options: Options(
-            headers: headers,
-            responseType: ResponseType.bytes,
-            validateStatus: (_) => true,
-            followRedirects: true,
-          ),
-        );
-        final bytes = response.data ?? const <int>[];
-        final magic = identifyImage(Uint8List.fromList(bytes.isEmpty ? List<int>.filled(0, 0) : bytes));
+        final response = await guardedGet(dio, fetchUrl, headers, allowLocal: allowLocal);
+        final bytes = response.data!;
+        final magic = identifyImage(Uint8List.fromList(bytes));
         sample['url'] = fetchUrl.split('?').first;
         sample['status'] = response.statusCode;
         sample['magic'] = magic;
         sample['size'] = bytes.length;
-        sample['sha256'] = bytes.isEmpty
-            ? ''
-            : sha256.convert(bytes.take(1 << 20).toList()).toString();
-        final decodable = magic == 'JPEG' || magic == 'PNG' || magic == 'GIF' ||
-            (magic == 'WebP' && bytes.length > 12 && bytes[12] == 0x56 && bytes[13] == 0x50);
-        if (response.statusCode == 200 && magic != 'HTML(非图片)' && !magic.startsWith('未知') && bytes.isNotEmpty) {
-          // 完整解码验证; AVIF 等不支持解码的格式记录"字节可信但未解码"
-          if (decodable) {
-            try {
-              final decoded = imglib.decodeImage(Uint8List.fromList(bytes));
-              sample['decoded'] = decoded != null;
-              sample['width'] = decoded?.width;
-              sample['height'] = decoded?.height;
-              decodeSupported++;
-              if (decoded == null) {
-                sample['verified'] = false;
-                sample['error'] = 'IMAGE_DECODE_FAILED';
-                sampleResults.add(sample);
-                break;
-              }
-            } catch (e) {
-              sample['decoded'] = false;
-              sample['verified'] = false;
-              sample['error'] = 'IMAGE_DECODE_FAILED: $e';
-              sampleResults.add(sample);
-              break;
-            }
-          } else {
-            sample['decoded'] = null;
-            sample['note'] = '字节格式可信但运行时无解码器, 未执行解码';
-          }
-          sample['verified'] = true;
-          verified++;
-        } else {
+        sample['sha256'] =
+            bytes.isEmpty ? '' : sha256.convert(bytes.take(1 << 20).toList()).toString();
+        final okStatus = response.statusCode == 200 && bytes.isNotEmpty;
+        final trustedImage = magic != 'HTML(非图片)' && !magic.startsWith('未知');
+        if (!okStatus || !trustedImage) {
           sample['verified'] = false;
-          if (magic == 'HTML(非图片)') {
-            sample['error'] = 'IMAGE_HTML_INSTEAD_OF_IMAGE';
-          } else if (bytes.isEmpty) {
-            sample['error'] = 'IMAGE_EMPTY';
-          }
+          sample['error'] = !okStatus
+              ? 'IMAGE_HTTP_ERROR'
+              : (magic == 'HTML(非图片)' ? 'IMAGE_HTML_INSTEAD_OF_IMAGE' : 'IMAGE_UNRECOGNIZED');
           sampleResults.add(sample);
           break;
         }
+        final decodable = magic == 'JPEG' || magic == 'PNG' || magic == 'GIF' ||
+            (magic == 'WebP' && bytes.length > 12 && bytes[12] == 0x56 && bytes[13] == 0x50);
+        if (decodable) {
+          try {
+            final decodedImg = imglib.decodeImage(Uint8List.fromList(bytes));
+            sample['decoded'] = decodedImg != null;
+            sample['width'] = decodedImg?.width;
+            sample['height'] = decodedImg?.height;
+            if (decodedImg == null) {
+              sample['verified'] = false;
+              sample['error'] = 'IMAGE_DECODE_FAILED';
+              sampleResults.add(sample);
+              break;
+            }
+          } catch (e) {
+            sample['decoded'] = false;
+            sample['verified'] = false;
+            sample['error'] = 'IMAGE_DECODE_FAILED: $e';
+            sampleResults.add(sample);
+            break;
+          }
+          decoded++;
+        } else {
+          // AVIF 等无解码器格式: 字节签名可信, 如实记录未执行解码
+          sample['decoded'] = null;
+          sample['note'] = '字节格式可信但运行时无解码器, 未执行解码';
+          decodeUnsupported++;
+        }
+        sample['verified'] = true;
+        verified++;
       } catch (e) {
+        final reason = '$e';
         sample['verified'] = false;
         sample['status'] = 'ERR';
-        sample['error'] = '$e';
+        sample['error'] = reason.startsWith('URL_GUARD') || reason.startsWith('DNS_GUARD')
+            ? 'URL_GUARD_REJECTED'
+            : 'IMAGE_FETCH_ERROR';
+        sample['error_detail'] = reason;
         sampleResults.add(sample);
         break;
       }
@@ -281,7 +363,8 @@ Future<void> main(List<String> arguments) async {
     out['requested_image_count'] = requested;
     out['attempted_image_count'] = sampleResults.length;
     out['verified_image_count'] = verified;
-    out['decoded_image_count'] = decodeSupported;
+    out['decoded_image_count'] = decoded;
+    out['unsupported_decode_count'] = decodeUnsupported;
     out['samples'] = sampleResults;
     stdout.writeln(jsonEncode(out));
     exit(verified > 0 ? 0 : 1);
@@ -294,4 +377,3 @@ Future<void> main(List<String> arguments) async {
     exit(1);
   }
 }
-
