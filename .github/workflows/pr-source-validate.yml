@@ -26,16 +26,15 @@ jobs:
       - name: Fetch base branch
         run: git fetch origin "${{ github.base_ref }}"
 
-      - name: Clone latest venera_cli
-        run: git clone --depth 1 https://github.com/venera-app/venera_cli.git /tmp/venera_cli
-
-      - name: Get venera_cli dependencies
-        working-directory: /tmp/venera_cli
-        run: dart pub get
-
-      - name: Build venera_cli
-        working-directory: /tmp/venera_cli
-        run: dart build cli --target bin/venera.dart --output /tmp/venera
+      - name: Clone and build venera_cli runtime (pinned, 与定时任务同版本)
+        run: |
+          VSA_CLI_PIN="$(cat scripts/vsa/RUNTIME_PIN)"
+          echo "runtime_build_id=$VSA_CLI_PIN" >> "$GITHUB_ENV"
+          git clone https://github.com/venera-app/venera_cli.git /tmp/venera_cli
+          cd /tmp/venera_cli
+          git checkout --detach "$VSA_CLI_PIN"
+          dart pub get
+          dart build cli --target bin/venera.dart --output /tmp/venera
 
       - name: Collect changed config files
         id: changed-configs

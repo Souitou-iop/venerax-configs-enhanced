@@ -94,8 +94,9 @@ BLOCKED 必须基于可观察的外部限制证据, 不是疑难故障的垃圾�
 
 - 图片阶段优先走薄 Dart runner(`scripts/vsa_dart/`):运行时内调用源自身 `loadComicPages` 与 `getImageLoadingConfig`(JS `onImageLoad`)获取**动态请求头**,再实抓样本字节。这覆盖了 Referer/随机头/Token 等静态配置无法满足的源(manhuaren/manga51/Komiic/comick 等实测翻绿)。
 - `image_count` 每源可配并真实透传到 runner;报告输出 `requested/available/attempted/verified` 四个计数, 样本不足如实标注, 不偷换。
-- 抽样图片逐张做 magic bytes + 完整解码(JPEG/PNG/WebP/GIF 经 `package:image`;AVIF 记录"字节可信但未解码", 不声称 decoded)。
-- **URL 安全护栏**:源 JS 返回的 URL 视为不可信输入——仅允许 http/https 公网目标, 拒绝环回/私网/云元数据地址(SSRF);Python 静态诊断路径证书校验全程开启(不再有 CERT_NONE)。
+- 抽样图片逐张做 magic bytes + 完整解码(JPEG/PNG/WebP/GIF 经 `package:image`;AVIF 记录"字节可信但未解码", 不声称 decoded)。`runtime_image_decoded` 当且仅当**全部已验证样本解码成功**;存在未解码样本时如实降为 `runtime_image_bytes` 并报告 `unsupported_decode_count`。
+- **URL 安全护栏(P0-A)**:源 JS 返回的 URL 视为不可信输入——仅允许 http/https 公网目标;拒绝环回/私网/链路本地/CGNAT/云元数据地址,覆盖 IPv4、IPv6(ULA/link-local)与 IPv4-mapped 形式;**DNS 解析结果逐 IP 校验**(runner 图片路径 + JS 网络桥 interceptor);runner 图片抓取 `followRedirects=false` 手动逐跳跟随, 每一跳重走护栏。
+- **已声明的残余风险**(不宣称全链路 SSRF 已修复):DNS 校验与实际连接之间存在 TOCTOU 窗口(DNS rebinding);JS 网络桥经 Dio 的重定向跳转目标未重校验(初始 URL 已护栏);全链路出站隔离需进程/网络层沙箱, 本轮未实现——以上列为合并前已知风险。
 - Runner 缺失/协议异常/输出畸形在严格模式一律 ERROR, 不被静态回退掩盖成 PASS;静态头检查仅在 `--allow-degraded` 诊断模式可用且标记 `image_header`。
 
 ## 离线 Fixture 负向矩阵(P1-2)

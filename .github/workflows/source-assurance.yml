@@ -12,10 +12,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # P1-3 依赖固定: venera_cli 上游 commit(升级时人工更新并核对 CHANGELOG)
-  VSA_CLI_PIN: "f1fab426874311a0b355473082c16582e6861a25"
-
 jobs:
   assure:
     runs-on: ubuntu-latest
@@ -36,10 +32,11 @@ jobs:
 
       - name: Clone and build venera_cli runtime (pinned)
         run: |
+          VSA_CLI_PIN="$(cat scripts/vsa/RUNTIME_PIN)"
+          echo "runtime_build_id=$VSA_CLI_PIN" >> "$GITHUB_ENV"
           git clone https://github.com/venera-app/venera_cli.git /tmp/venera_cli
           cd /tmp/venera_cli
           git checkout --detach "$VSA_CLI_PIN"
-          echo "runtime_build_id=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           dart pub get
           dart build cli --target bin/venera.dart --output /tmp/venera
 

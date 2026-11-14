@@ -42,6 +42,8 @@ COMICS = [
     {"id": "neg-second", "title": "VSA Negative Second Image"},
     {"id": "neg-ssrf", "title": "VSA Negative SSRF URL"},
     {"id": "cm-1img", "title": "VSA Count Mismatch (1 available)"},
+    {"id": "neg-pages-empty", "title": "VSA Negative Empty Pages"},
+    {"id": "mix-decode", "title": "VSA Mixed Decode (JPEG+AVIF)"},
 ]
 
 
@@ -96,8 +98,12 @@ class _Handler(BaseHTTPRequestHandler):
                 import time
                 time.sleep(8)
             base = f"http://127.0.0.1:{self.server.server_address[1]}"
-            if cid == "cm-1img":
+            if cid == "neg-pages-empty":
+                imgs = []
+            elif cid == "cm-1img":
                 imgs = [f"{base}/img/{cid}/1.jpg"]
+            elif cid == "mix-decode":
+                imgs = [f"{base}/img/{cid}/1.jpg", f"{base}/img/{cid}/2.img"]
             elif cid == "neg-ssrf":
                 # 内网与云元数据地址: SSRF 护栏必须拒绝
                 imgs = ["http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:9/x.jpg"]
