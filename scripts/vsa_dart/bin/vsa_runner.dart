@@ -315,8 +315,8 @@ Future<void> main(List<String> arguments) async {
           sampleResults.add(sample);
           break;
         }
-        final decodable = magic == 'JPEG' || magic == 'PNG' || magic == 'GIF' ||
-            (magic == 'WebP' && bytes.length > 12 && bytes[12] == 0x56 && bytes[13] == 0x50);
+        // WebP 不区分 VP8/VP8L/VP8X 变体, 统一尝试解码(package:image 支持)
+        final decodable = magic == 'JPEG' || magic == 'PNG' || magic == 'GIF' || magic == 'WebP';
         if (decodable) {
           try {
             final decodedImg = imglib.decodeImage(Uint8List.fromList(bytes));
