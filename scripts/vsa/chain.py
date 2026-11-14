@@ -159,10 +159,8 @@ def _norm_patterns(patterns: list) -> list:
 
 
 def _match_typed(patterns: list, stderr: str, body_head: bytes | None) -> tuple | None:
-    """返回命中的 (kind, value), 未命中返回 None。"""
+    """返回命中的 (kind, value), 未命中返回 None。status 由结构化抽取处理, 不做子串匹配。"""
     for kind, value in _norm_patterns(patterns):
-        if kind == "status" and value in stderr:
-            return (kind, value)
         if kind == "err" and value.lower() in stderr.lower():
             return (kind, value)
         if kind == "body" and body_head and value.lower() in body_head.lower():
@@ -247,37 +245,67 @@ def guard_url(url: str, allow_local: bool = False) -> str | None:
     return None
 
 
+# 结构化 HTTP 状态抽取: 仅识别源 JS 显式抛出的状态码(Invalid status/HTTP/Request Error 等),
+# 不做任意子串匹配 —— stderr 文本中偶然出现的数字不会被当作 HTTP 状态。
+HTTP_STATUS_RE = re.compile(
+    r"(?:Invalid status(?: code)?|HTTP|Request Error|Invalid Response|状态码)\s*[:=]?\s*(\d{3})", re.I)
+
+
+def extract_http_status(stderr: str) -> int | None:
+    m = HTTP_STATUS_RE.search(stderr or "")
+    return int(m.group(1)) if m else None
+
+
 def classify_failure(stage: str, stderr: str, patterns: list,
-                     challenge_evidence: dict | None = None) -> tuple[str, str, dict]:
-    """按 P0-2 原则归因失败: 返回 (state, error_code, evidence)。"""
+                     challenge_evidence: dict | None = None,
+                     http_status: int | None = None) -> tuple[str, str, dict]:
+    """按 P0-2 原则归因失败: 返回 (state, error_code, evidence)。
+
+    证据分层: observed(事实) → classification(六态) → suspected_cause(标注为假设)。
+    """
     stderr = stderr or ""
-    # 1. 认证类 → BLOCKED(AUTH_REQUIRED)
+    if http_status is None:
+        http_status = extract_http_status(stderr)
+    # 1. 认证类(源 JS 显式抛出的登录要求) → BLOCKED(AUTH_REQUIRED)
     if _is_auth_error(stderr):
         marker = next((m for m in AUTH_MARKERS if m in stderr.lower()), "")
-        return STATE_BLOCKED, "AUTH_REQUIRED", {"evidence_type": "auth", "marker": marker}
+        return STATE_BLOCKED, "AUTH_REQUIRED", {
+            "evidence_type": "auth", "marker": marker,
+            "suspected_cause": "auth_required", "confidence": "high"}
     # 2. JS 层错误 → FAIL(挑战页证据探测在调用方先行完成, 命中则走 3)
     if _is_js_error(stderr):
         if challenge_evidence and challenge_evidence.get("kind") in ("challenge", "captcha"):
             return STATE_BLOCKED, "CHALLENGE_PAGE", {
-                "evidence_type": "challenge_page",
+                "evidence_type": "challenge_page", "probe": "site_homepage",
                 "marker": challenge_evidence.get("marker", ""),
-                "probe": "site_homepage",
-            }
-        return STATE_FAIL, _stage_error_code(stage, kind="parse"), {"evidence_type": "js_error"}
-    # 3. 类型化声明模式
+                "suspected_cause": "environment_blocked", "confidence": "medium"}
+        return STATE_FAIL, _stage_error_code(stage, kind="parse"), {
+            "evidence_type": "js_error", "suspected_cause": "unknown"}
+    # 3. 真实 HTTP 状态(结构化抽取) + 声明模式 → BLOCKED(带不确定标注)
+    if http_status is not None:
+        declared = any(kind == "status" and value == str(http_status)
+                       for kind, value in _norm_patterns(patterns))
+        evidence = {"evidence_type": "http_status", "http_status": http_status,
+                    "suspected_cause": "uncertain",
+                    "expected_environment_constraint": declared}
+        if declared:
+            evidence["confidence"] = "medium"
+            return STATE_BLOCKED, "NETWORK_STATUS_BLOCKED", evidence
+        # 未声明的状态错误: 保留 403/5xx 事实, 不捏造归因 → FAIL
+        return STATE_FAIL, _stage_error_code(stage, kind="other"), evidence
+    # 4. 类型化 err 模式(仅限明确传输层短语, 由声明提供先验)
     hit = _match_typed(patterns, stderr, None)
-    if hit:
-        kind, value = hit
-        if kind == "status":
-            return STATE_BLOCKED, "NETWORK_STATUS_BLOCKED", {
-                "evidence_type": "http_status", "status": value}
+    if hit and hit[0] == "err":
         return STATE_BLOCKED, "DECLARED_ENV_BLOCKED", {
-            "evidence_type": "stderr_pattern", "marker": value}
-    # 4. 传输层故障(超时/拒连)无声明 → UNVERIFIED
+            "evidence_type": "stderr_pattern", "marker": hit[1],
+            "suspected_cause": "environment_blocked", "confidence": "medium"}
+    # 5. 传输层故障(超时/拒连)无声明 → UNVERIFIED
     if any(k in stderr.lower() for k in ("timed out", "timeout", "connection refused", "errno 111")):
-        return STATE_UNVERIFIED, "NETWORK_TIMEOUT", {"evidence_type": "network"}
-    # 5. 其余 → FAIL
-    return STATE_FAIL, _stage_error_code(stage, kind="other"), {"evidence_type": "stderr"}
+        return STATE_UNVERIFIED, "NETWORK_TIMEOUT", {
+            "evidence_type": "network", "suspected_cause": "unknown"}
+    # 6. 其余 → FAIL
+    return STATE_FAIL, _stage_error_code(stage, kind="other"), {
+        "evidence_type": "stderr", "suspected_cause": "unknown"}
 
 
 def _stage_error_code(stage: str, kind: str = "other") -> str:
@@ -595,14 +623,22 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             "images_verified": runner_payload.get("verified_image_count", 0),
         }
         if not runner_payload.get("ok"):
-            err_code = runner_payload.get("error_code") or "IMAGE_HTTP_ERROR"
             first_bad = next((s for s in runner_payload.get("samples", []) if not s.get("verified")), {})
             status = first_bad.get("status")
-            # runner 图片失败同样走声明式分类: 状态命中 patterns → BLOCKED, 其余 FAIL
-            synth_stderr = f"HTTP {status} {first_bad.get('error', '')} {runner_payload.get('error', '')}"
-            state, code, evidence = classify_failure("image", synth_stderr, patterns)
+            sample_err = first_bad.get("error", "") or runner_payload.get("error", "")
             detail = (f"样本{first_bad.get('index', 0) + 1}: HTTP {status} "
-                      f"{first_bad.get('magic')} {first_bad.get('error', runner_payload.get('error', ''))}")
+                      f"{first_bad.get('magic', '')} {sample_err}").strip()
+            # 结构化错误码优先(SOURCE_PAGES_EMPTY/IMAGE_DECODE_FAILED 等是数据/解码层事实 → FAIL);
+            # 仅 HTTP 状态类失败走声明式分类(status 命中 → BLOCKED, 证据=http_status)
+            runner_code = runner_payload.get("error_code") or ""
+            if runner_code in ("SOURCE_PAGES_EMPTY", "SOURCE_PAGES_ERROR"):
+                state, code, evidence = STATE_FAIL, runner_code, {
+                    "evidence_type": "image", "suspected_cause": "unknown",
+                    "expected_environment_constraint": True}
+            else:
+                state, code, evidence = classify_failure(
+                    "image", synth := f"HTTP {status} {sample_err}", patterns,
+                    http_status=int(status) if isinstance(status, int) else None)
             res.add("image", state, detail[:200], error_code=code,
                     evidence={"evidence_type": "image", "counts": counts, **evidence})
             res.state = state
@@ -617,12 +653,17 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             res.state = STATE_FAIL
             res.error_code = "IMAGE_COUNT_MISMATCH"
             return res
+        # P1-A level 真值: runtime_image_decoded 当且仅当全部已验证样本解码成功;
+        # 有未解码样本(字节可信但无解码器) → runtime_image_bytes, 不夸大
+        all_decoded = (counts.get("decoded_image_count", 0) == counts["images_verified"]
+                       and counts["images_verified"] > 0)
+        level = LEVEL_RUNTIME_DECODED if all_decoded else LEVEL_RUNTIME_BYTES
         first = (runner_payload.get("samples") or [{}])[0]
-        decoded = first.get("decoded") is True
-        level = LEVEL_RUNTIME_DECODED if decoded else LEVEL_RUNTIME_BYTES
         note = ""
         if counts["images_available"] < counts["images_requested"]:
             note = f"; 样本不足(可用 {counts['images_available']} < 请求 {counts['images_requested']})"
+        if counts.get("unsupported_decode_count", 0) > 0:
+            note += f"; {counts['unsupported_decode_count']} 张格式无解码器(字节可信未解码)"
         res.add("image", STATE_PASS,
                 f"{counts['images_verified']}/{counts['images_requested']} 张验证通过 "
                 f"(解码 {counts.get('decoded_image_count', 0)}, "
@@ -630,8 +671,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
                 error_code="", evidence={"evidence_type": "image", "counts": counts})
         res.state = STATE_PASS
         res.verification_level = level
-        if res.state == STATE_PASS:
-            res.detail = "端到端通过(运行时动态头 + 真实图片字节)"
+        res.detail = "端到端通过(运行时动态头 + 真实图片字节)"
         return res
 
     # limited 模式静态诊断(弱验证)
