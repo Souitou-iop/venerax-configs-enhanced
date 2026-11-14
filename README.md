@@ -37,6 +37,10 @@
 
 ## 🛠️ 修复与更新日志 (Changelog)
 
+### 2026-11-14 VSA 可靠性整改(P0/P1)
+
+按可靠性整改指南完成 P0/P1:严格模式(缺 Runner/协议异常一律 ERROR, 静态头检查降级为诊断模式并标记 `image_header`)、BLOCKED 证据化分类(JS 错误优先于受限声明、认证/状态/挑战页三类证据、移除早退)、`--check-coverage` 全源纳管门槛(新增源未配测试或豁免 PR 直接失败)、移除 TLS 校验关闭 + SSRF 护栏(源 JS 返回的 URL 视为不可信)、`image_count` 真实透传 runner + 逐张解码验证(截断/伪图被解码层抓出)、离线负向矩阵扩至 15 项全过、venera_cli 固定 commit(`VSA_CLI_PIN`)与 runner 构建来源进报告。Komiic 由声明受限转完整 PASS(runner 动态 Token 解决 401);MangaDex 按证据标准如实 FAIL(挑战页探针无法复现运行时头指纹, 人工 curl 证据记录于文档)。详见 [docs/vsa.md](docs/vsa.md) 与 [Diagnose RFC](docs/vsa-diagnose-rfc.md)。
+
 ### 2026-11-14 VSA 全量 46 源接入、薄 Dart runner 与首次 CI 验证
 
 - **全源配置**：`scripts/vsa/calibrate.py` 批量校准后 46 源全部纳入 VSA——探索页入口 24 源（Komiic/禁漫/E-Hentai/hitomi/紳士漫畫/カドコミ/mangabz/看漫画/comick/H-Comic/热辣/漫蛙/漫小肆/X漫画/思思/布卡/嬉皮/神奇/漫客栈 等）、搜索入口 15 源、声明式受限 7 源（哔咔/百合会/CCC/爱看漫/GoDa/包子/Komiic）。

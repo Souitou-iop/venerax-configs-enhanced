@@ -10,3 +10,5 @@ dependencies:
     git:
       url: https://github.com/venera-app/venera_core.git
   dio: ^5.0.0
+  crypto: ^3.0.8
+  image: ^4.13.0

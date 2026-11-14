@@ -30,6 +30,7 @@ def build_report(meta: dict, results: list[SourceResult]) -> dict:
     for r in results:
         summary[r.state] = summary.get(r.state, 0) + 1
     return {
+        "schema_version": 2,
         "meta": meta,
         "summary": summary,
         "results": [
@@ -41,9 +42,13 @@ def build_report(meta: dict, results: list[SourceResult]) -> dict:
                 "js_sha256": r.js_sha256,
                 "state": r.state,
                 "detail": r.detail,
-                "error_class": r.error_class,
+                "error_code": r.error_code,
+                "verification_level": r.verification_level,
+                "evidence": r.evidence,
                 "stages": [
-                    {"stage": s.name, "state": s.state, "detail": s.detail, "elapsed_ms": s.elapsed_ms}
+                    {"stage": s.name, "state": s.state, "detail": s.detail,
+                     "elapsed_ms": s.elapsed_ms, "error_code": s.error_code,
+                     "evidence": s.evidence}
                     for s in r.stages
                 ],
             }

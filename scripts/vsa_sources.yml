@@ -8,17 +8,9 @@ sources:
   Komiic:
     entry: explore
     explore_index: 0
-    expect: blocked
-    blocked_reason: 正文图片需要源内 onImageLoad 注入动态 Authorization/Cookie(Komiic 图片鉴权), CLI
-      pages 仅返回 URL, driver 静态头无法携带动态 Token; 待薄 Dart runner 方案后转完整验收
     blocked_patterns: []
   manga_dex:
     keyword: one piece
-    expect: blocked
-    blocked_reason: '运行时兼容性差异: venera 运行时默认以浏览器 UA 请求, api.mangadex.org 对 "浏览器 UA
-      + 机房 IP" 返回 bot challenge 页(HTML); 真实客户端在住宅网络下不受影响'
-    blocked_patterns:
-    - unexpected token
   zaimanhua:
     entry: explore
     explore_index: 0
@@ -81,7 +73,6 @@ sources:
     - '403'
     - Connection refused
     - timed out
-    - unexpected token
     - Errno 111
     blocked_reason: GraphQL 搜索对机房 IP 弹 bot 挑战(HTML); 命中即归 BLOCKED, 验收通过时仍 PASS
   comic_walker:
@@ -91,7 +82,6 @@ sources:
     - '403'
     - Connection refused
     - timed out
-    - unexpected token
     - Errno 111
     blocked_reason: 站点对机房 IP 弹 bot 挑战(HTML); 命中即归 BLOCKED, 验收通过时仍 PASS
   ccc:

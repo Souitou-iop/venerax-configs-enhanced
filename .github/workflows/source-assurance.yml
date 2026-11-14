@@ -1,8 +1,8 @@
 name: Source Assurance (VSA)
 
 # Layer 2 真实漫画源 JS 验收: 通过官方 venera_cli(QuickJS 运行时)执行仓库源文件,
-# 完成 搜索→详情→章节→图片字节 全链路。与 Layer 1 网站健康探针(health-check.yml)
-# 互相独立: Layer 1 绿灯不继承为 Layer 2 通过。
+# 完成 搜索→详情→章节→图片字节 全链路(含薄 Dart runner 的 onImageLoad 动态头取图)。
+# 与 Layer 1 网站健康探针(health-check.yml)互相独立: Layer 1 绿灯不继承为 Layer 2 通过。
 on:
   schedule:
     # 每日 03:30 UTC(北京时间 11:30), 与健康探针(00:15/12:15 UTC)错开
@@ -11,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # P1-3 依赖固定: venera_cli 上游 commit(升级时人工更新并核对 CHANGELOG)
+  VSA_CLI_PIN: "f1fab426874311a0b355473082c16582e6861a25"
 
 jobs:
   assure:
@@ -30,17 +34,32 @@ jobs:
       - name: Set up Dart SDK
         uses: dart-lang/setup-dart@v1
 
-      - name: Clone and build venera_cli runtime
+      - name: Clone and build venera_cli runtime (pinned)
         run: |
-          git clone --depth 1 https://github.com/venera-app/venera_cli.git /tmp/venera_cli
+          git clone https://github.com/venera-app/venera_cli.git /tmp/venera_cli
           cd /tmp/venera_cli
+          git checkout --detach "$VSA_CLI_PIN"
+          echo "runtime_build_id=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           dart pub get
           dart build cli --target bin/venera.dart --output /tmp/venera
 
-      - name: Run VSA live acceptance
+      - name: Build VSA Dart runner (onImageLoad 动态头取图)
+        run: |
+          cd scripts/vsa_dart
+          dart pub get
+          dart build cli --target bin/vsa_runner.dart --output /tmp/vsa_runner
+          echo "runner_build_id=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          test -x /tmp/vsa_runner/bundle/bin/vsa_runner
+
+      - name: Coverage check (全源纳管, 无静默漏测)
+        run: python scripts/source_assurance.py --check-coverage --output /tmp/vsa_out
+
+      - name: Run VSA live acceptance (strict)
         run: |
           python scripts/source_assurance.py --all \
             --runtime /tmp/venera/bundle/bin/venera \
+            --runner /tmp/vsa_runner/bundle/bin/vsa_runner \
+            --data-dir /tmp/vsa_data \
             --output /tmp/vsa_out
 
       - name: Upload VSA report artifacts
