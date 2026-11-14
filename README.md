@@ -81,6 +81,12 @@
 
 ## 🛠️ 修复与更新日志 (Changelog)
 
+### 2026-11-14 VSA 真实源 JS 验收系统上线
+
+新增 **Venera Source Assurance (VSA)** 第二层验收基础设施（[docs/vsa.md](docs/vsa.md)）：通过官方 `venera_cli`（QuickJS 运行时）执行仓库原始源 JS 走完 搜索→详情→章节→图片字节 全链路，解决"Python 探针正常但真实源不可用"的验收盲区。包含：`scripts/source_assurance.py` 驱动与 `scripts/vsa/` 模块包、离线 fixture 正负向自检（8/8 判定路径）、每日 live 验收工作流与 PR 离线回归门槛、JSON/Markdown 双报告。
+
+上线即捕获真实问题：**manben 搜索解析 bug**（搜索页锚点无前导斜杠 + 图卡/标题锚点分离，`v1.0.0 → v1.0.1` 修复并经 VSA 复验 PASS）；记录 manga_dex 运行时 UA 兼容性差异（浏览器 UA + 机房 IP 触发 bot challenge，真实客户端不受影响）；copy_manga 设备反盗版风控在机房环境的声明式 BLOCKED 归类。
+
 ### 2026-11-14 同步上游 5 源修复并新增 11 个已验证漫画源
 
 根据社区源巡检 Issue #1 评论，同步 `senran-N/venera-configs` 的 5 个版本更新（全部保留本仓库更新地址）：紳士漫畫 `v2.0.2`（站点已对移动 UA 只出移动模板，旧版解析为空；新增移动版/排行榜解析与翻页修复）、E-Hentai `v1.2.5`（igneous 过滤丢返回值致 exhentai 登录态失效、cookie 解析死循环）、禁漫天堂 `v1.4.4`（分流 JSON 解析崩溃、旧章节散列截断致图片错位）、hitomi.la `v2.0.1`（分类翻页缓存跨类串数据）、Picacg `v1.0.9`（base_url 清空拼 undefined URL）。合并后 5 源均经端到端复验。
@@ -263,9 +269,14 @@
    - **告警降噪**：连续两轮探测异常才自动创建告警 Issue；风控限频与需登录源只记录不告警，避免误报刷屏；每次运行产物留存 14 天 Artifact 便于追溯。
    - **进程级保护**：单次探针任务设置 45 分钟硬超时；若探针在生成 `results.json` 前异常退出，会创建独立的崩溃告警 Issue，并避免重复创建相同告警。
    - **告警可读性与并发保护**：源级告警标题会包含受影响源名称；自动提交 README 前会先 rebase 远端 `main`，降低定时任务与其他自动提交之间的推送竞态。
-2. **社区源更新追踪机器人**：
+2. **Venera Source Assurance (VSA) 真实源验收**：
+   - 与上面的网站健康探针互补的第二层验收：通过官方 `venera_cli`（QuickJS 运行时）**加载并执行仓库中的原始源 JS**，完成 加载→元数据→搜索→详情→章节→真实图片字节 全链路验收，而非 Python 等效重放；
+   - 每日 03:30 UTC 定时对已配置源执行 live 验收（`source-assurance.yml`），JSON/Markdown 报告留存 14 天；
+   - PR 中以**离线 fixture 回归**（含 HTML 充图/损坏图/404/语法错误/异常等负向判定路径）作为确定性合并门槛，不依赖第三方站点随机状态；
+   - 六态判定（PASS/FAIL/BLOCKED/SKIP/UNVERIFIED/ERROR），BLOCKED 仅限显式声明的风控/兼容性限制；详细文档见 [docs/vsa.md](docs/vsa.md)。
+3. **社区源更新追踪机器人**：
    - 每两天按 cron 目标时间 **08:45（北京时间，UTC 00:45）** 自动监控 7+ 个社区 Fork 仓库，发现新源或更高版本时自动在仓库提 Issue 通知维护者。
-3. **jsDelivr CDN 缓存刷新**：
+4. **jsDelivr CDN 缓存刷新**：
    - 每次向 `main` 分支推送更新时，触发 jsDelivr CDN 缓存清理。
 
 ---

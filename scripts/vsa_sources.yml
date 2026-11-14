@@ -1,0 +1,42 @@
+# Venera Source Assurance (VSA) 每源测试配置
+#
+# keyword 各源单独配置(避免通用关键词误判); 新源接入时在此追加条目即可。
+# expect: blocked 表示该源存在已定位的运行环境限制, 仅执行加载+搜索两个确定性
+#         阶段后按 BLOCKED 归类, 并把 reason 写进报告(不伪造完整 PASS)。
+
+defaults:
+  timeout_stage: 120   # 单阶段(加载/搜索/详情/章节)超时秒数
+  timeout_image: 60    # 单张图片下载超时秒数
+  delay_between_sources: 3.0   # 源间隔, 控制对站点的请求节奏
+
+sources:
+  copy_manga:
+    keyword: "斗罗大陆"
+    image_headers:
+      Referer: "https://www.copymanga.site/"
+    blocked_patterns:
+      - "Expected available in"   # 短期限频 → BLOCKED 而非 FAIL
+      - "破解版本"                # 设备被反盗版风控标记(运行时生成的设备身份在机房环境易被标记)
+      - "請到官網"
+    # 注: 官方 API 搜索对简繁转换的匹配较宽, 返回首条可能与关键词字面不同, 不影响链路验收
+
+  ManHuaGui:
+    keyword: "斗罗大陆"
+    image_headers:
+      Referer: "https://www.manhuagui.com/"
+    # 图片 URL 含中文路径, driver 自动百分号编码; hamreus.com CDN 对部分机房网络不可达时
+    # 会在 image 阶段失败, 属网络限制而非源缺陷, 届时按 FAIL 展示并附环境说明
+
+  manga_dex:
+    keyword: "one piece"
+    expect: blocked
+    blocked_reason: >-
+      运行时兼容性差异: venera 运行时默认以浏览器 UA 请求, 而 api.mangadex.org 对
+      "浏览器 UA + 机房 IP" 返回 bot challenge 页(HTML), 导致 res.json() 抛错;
+      无 UA 或 Dart UA 直连均返回正常 JSON。真实客户端在住宅网络下不受影响。
+      待上游 venera_cli 支持按源注入 UA 后转为完整验收。
+
+  manben:
+    keyword: "山海逆战"
+    image_headers:
+      Referer: "https://www.manben.com/"

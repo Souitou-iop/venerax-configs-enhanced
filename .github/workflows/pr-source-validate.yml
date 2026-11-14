@@ -66,3 +66,12 @@ jobs:
       - name: No changed config files
         if: steps.changed-configs.outputs.count == '0'
         run: echo "No changed config files to validate."
+
+      # VSA 离线回归: 本地 fixture 走真实运行时验证框架判定路径(正向 + 负向),
+      # 不访问第三方网站, 失败会阻断合并(确定性检查作为 PR 门槛)。
+      - name: VSA offline regression
+        run: |
+          pip install pyyaml
+          python scripts/source_assurance.py --self-test \
+            --runtime /tmp/venera/bundle/bin/venera \
+            --output /tmp/vsa_out

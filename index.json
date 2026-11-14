@@ -276,8 +276,8 @@
     "name": "漫本",
     "fileName": "manben.js",
     "key": "manben",
-    "version": "1.0.0",
-    "description": "dm5 族：阅读页壳化改版适配，chapterfun.ashx packer 两段解包",
+    "version": "1.0.1",
+    "description": "dm5 族：阅读页壳化改版适配，chapterfun.ashx packer 两段解包；v1.0.1 修复搜索页锚点解析",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manben.js"
   },
   {

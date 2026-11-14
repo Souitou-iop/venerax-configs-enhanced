@@ -12,7 +12,7 @@
 class Manben extends ComicSource {
   name = "漫本";
   key = "manben";
-  version = "1.0.0";
+  version = "1.0.1";
   minAppVersion = "1.0.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manben.js";
 
@@ -35,22 +35,36 @@ class Manben extends ComicSource {
   }
 
   static parseComicLinks(document) {
-    let comics = [];
-    let seen = {};
+    // 搜索页与列表页锚点结构不同: 列表页 <a href="/mh-x/">含文本,
+    // 搜索页为 纯图锚点(<a href="mh-x">无前导斜杠) + 标题锚点(<a><p class="title">)
+    // 分离在同一条目上, 需按 id 合并 cover 与 title。
+    let map = {};
+    let order = [];
     for (let a of document.querySelectorAll("a[href*='mh-']")) {
       let href = a.attributes["href"] || "";
-      let m = href.match(/\/(mh-[^\/#?]+)\/?/i);
+      let m = href.match(/mh-[^\/#?\s]+/i);
       if (!m) continue;
-      let id = m[1];
+      let id = m[0];
       if (/mh-(updated|boutique|recommend|rank)/i.test(id)) continue;
-      if (seen[id]) continue;
+      if (!map[id]) {
+        map[id] = { title: "", cover: "" };
+        order.push(id);
+      }
       let title = (a.attributes["title"] || a.text || "").trim();
-      if (title.length < 1) continue;
-      seen[id] = true;
-      let img = a.querySelector("img");
-      let cover = "";
-      if (img) cover = img.attributes["data-src"] || img.attributes["src"] || "";
-      comics.push(new Comic({ id, title, cover: Manben.abs(cover) }));
+      if (!title) {
+        let p = a.querySelector("p.title, .title");
+        if (p) title = (p.text || "").trim();
+      }
+      if (title && !map[id].title) map[id].title = title;
+      if (!map[id].cover) {
+        let img = a.querySelector("img");
+        if (img) map[id].cover = img.attributes["data-src"] || img.attributes["src"] || "";
+      }
+    }
+    let comics = [];
+    for (let id of order) {
+      if (!map[id].title) continue;
+      comics.push(new Comic({ id, title: map[id].title, cover: Manben.abs(map[id].cover) }));
     }
     return comics;
   }

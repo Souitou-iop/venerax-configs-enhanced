@@ -1,0 +1,52 @@
+name: Source Assurance (VSA)
+
+# Layer 2 真实漫画源 JS 验收: 通过官方 venera_cli(QuickJS 运行时)执行仓库源文件,
+# 完成 搜索→详情→章节→图片字节 全链路。与 Layer 1 网站健康探针(health-check.yml)
+# 互相独立: Layer 1 绿灯不继承为 Layer 2 通过。
+on:
+  schedule:
+    # 每日 03:30 UTC(北京时间 11:30), 与健康探针(00:15/12:15 UTC)错开
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install driver dependencies
+        run: pip install pyyaml
+
+      - name: Set up Dart SDK
+        uses: dart-lang/setup-dart@v1
+
+      - name: Clone and build venera_cli runtime
+        run: |
+          git clone --depth 1 https://github.com/venera-app/venera_cli.git /tmp/venera_cli
+          cd /tmp/venera_cli
+          dart pub get
+          dart build cli --target bin/venera.dart --output /tmp/venera
+
+      - name: Run VSA live acceptance
+        run: |
+          python scripts/source_assurance.py --all \
+            --runtime /tmp/venera/bundle/bin/venera \
+            --output /tmp/vsa_out
+
+      - name: Upload VSA report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsa-reports
+          path: /tmp/vsa_out/
+          retention-days: 14
