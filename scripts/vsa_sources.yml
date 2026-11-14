@@ -88,7 +88,8 @@ sources:
     keyword: ''
     expect: blocked
     blocked_reason: 章节需验证码登录; search 阶段可验证后按声明归类
-    blocked_patterns: []
+    blocked_patterns:
+    - 空图片列表
   manga51:
     keyword: 百合
     blocked_patterns:

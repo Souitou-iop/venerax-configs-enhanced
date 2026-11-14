@@ -597,13 +597,18 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
         if not runner_payload.get("ok"):
             err_code = runner_payload.get("error_code") or "IMAGE_HTTP_ERROR"
             first_bad = next((s for s in runner_payload.get("samples", []) if not s.get("verified")), {})
-            detail = (f"样本{first_bad.get('index', 0) + 1}: HTTP {first_bad.get('status')} "
+            status = first_bad.get("status")
+            # runner 图片失败同样走声明式分类: 状态命中 patterns → BLOCKED, 其余 FAIL
+            synth_stderr = f"HTTP {status} {first_bad.get('error', '')} {runner_payload.get('error', '')}"
+            state, code, evidence = classify_failure("image", synth_stderr, patterns)
+            detail = (f"样本{first_bad.get('index', 0) + 1}: HTTP {status} "
                       f"{first_bad.get('magic')} {first_bad.get('error', runner_payload.get('error', ''))}")
-            res.add("image", STATE_FAIL, detail[:200], error_code=err_code,
-                    evidence={"evidence_type": "image", "counts": counts})
-            res.state = STATE_FAIL
-            res.error_code = err_code
+            res.add("image", state, detail[:200], error_code=code,
+                    evidence={"evidence_type": "image", "counts": counts, **evidence})
+            res.state = state
+            res.error_code = code
             res.evidence.update({"counts": counts})
+            res.evidence.update(evidence)
             return res
         if counts["images_verified"] < counts["images_attempted"]:
             res.add("image", STATE_FAIL,
