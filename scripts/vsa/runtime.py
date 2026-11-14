@@ -142,8 +142,11 @@ class VeneraRuntime:
     @property
     def version(self) -> str:
         if self._version is None:
-            r = self.run(["-v"], timeout=30)
-            self._version = r.stdout.strip() or "unknown"
+            if not self.binary.exists():
+                self._version = "not-used(full-link runner converted)"
+            else:
+                r = self.run(["-v"], timeout=30)
+                self._version = r.stdout.strip() or "unknown"
         return self._version
 
     def run(self, args: list[str], timeout: int = 120) -> CmdResult:
