@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import SourceTestConfig, VsaConfig, js_field
-from .runtime import RUNTIME_UA, VeneraRuntime
+from .runtime import RUNTIME_UA, CmdResult, VeneraRuntime
 
 STATE_PASS = "PASS"
 STATE_FAIL = "FAIL"
@@ -97,6 +97,17 @@ def identify_image(head: bytes) -> str:
     if b"<html" in head[:200].lower() or b"<!doctype" in head[:200].lower():
         return "HTML(非图片)"
     return f"未知({head[:8].hex()})"
+
+
+def runner_infra_error(r) -> tuple | None:
+    """Runner 自身故障(协议/缺失/异常) → ERROR; 与源级失败严格区分。"""
+    stderr = str(getattr(r, "stderr", "") or "")
+    code = getattr(r, "exit_code", None)
+    if stderr.startswith("RUNNER_PROTOCOL_ERROR"):
+        return (STATE_ERROR, "RUNNER_PROTOCOL_ERROR", {"evidence_type": "runner"})
+    if code == 66 or stderr == "RUNNER_MISSING":
+        return (STATE_ERROR, "RUNNER_MISSING", {"evidence_type": "runner"})
+    return None
 
 
 def _sanitize_url(url: str, limit: int = 100) -> str:
@@ -356,7 +367,7 @@ def verify_images_via_runner(runner: Path, js_path: Path, key: str, comic_id: st
     import subprocess as sp
     try:
         proc = sp.run(
-            [str(runner), "--data", str(data_dir), "--load", str(js_path),
+            [str(runner), "--cmd", "verify", "--data", str(data_dir), "--load", str(js_path),
              "--key", key, "--comic-id", str(comic_id), "--ep-id", str(ep_id),
              "--count", str(count)] + (["--allow-local"] if allow_local else []),
             capture_output=True, text=True, timeout=timeout,
@@ -379,6 +390,63 @@ class RunnerContext:
     binary: Path | None = None
     data_dir: Path | None = None
     strict: bool = True
+    allow_local: bool = False
+    js_path: Path | None = None  # 当前验收的源文件(runner 每次 --load)
+
+    def _run_cmd(self, cmd: str, key: str, js_path: Path,
+                 keyword: str = "", page: int = 1, index: int = 0,
+                 comic_id: str = "", ep_id: str = "",
+                 timeout: int = 120) -> "CmdResult":
+        """经 runner 子命令执行阶段(护栏 Dio 覆盖全部网络, 取代独立 venera_cli)。"""
+        import subprocess as sp
+        binary = self.binary
+        if binary is None or not Path(binary).exists():
+            return CmdResult(ok=False, exit_code=66, stdout="", stderr="RUNNER_MISSING",
+                             elapsed_ms=0)
+        load_path = self.js_path or js_path
+        args = [str(binary), "--cmd", cmd, "--data", str(self.data_dir or Path("/tmp/vsa_data")),
+                "--load", str(load_path), "--key", key]
+        if self.allow_local:
+            args.append("--allow-local")
+        if cmd == "search":
+            args += ["--keyword", keyword, "--page", str(page)]
+        if cmd == "explore":
+            args += ["--index", str(index)]
+        if cmd in ("info", "pages", "verify"):
+            args += ["--comic-id", str(comic_id)]
+        if cmd in ("pages", "verify"):
+            args += ["--ep-id", str(ep_id)]
+        t0 = time.time()
+        try:
+            proc = sp.run(args, capture_output=True, text=True, timeout=timeout)
+        except sp.TimeoutExpired:
+            return CmdResult(ok=False, exit_code=124, stdout="",
+                             stderr=f"timeout after {timeout}s", elapsed_ms=int(timeout * 1000))
+        try:
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            return CmdResult(ok=False, exit_code=proc.returncode, stdout=proc.stdout,
+                             stderr=f"RUNNER_PROTOCOL_ERROR: {proc.stderr[:150]}",
+                             elapsed_ms=int((time.time() - t0) * 1000))
+        return CmdResult(ok=proc.returncode == 0 and bool(payload.get("ok")),
+                         exit_code=proc.returncode, stdout=proc.stdout,
+                         stderr=str(payload.get("error", "")) if not payload.get("ok") else "",
+                         elapsed_ms=int((time.time() - t0) * 1000), payload=payload)
+
+    def load_source(self, js_path: Path, timeout: int = 90) -> "CmdResult":
+        return self._run_cmd("load", js_field(js_path, "key") or "", js_path, timeout=timeout)
+
+    def search(self, key: str, keyword: str, page: int = 1, timeout: int = 120) -> "CmdResult":
+        return self._run_cmd("search", key, Path("."), keyword=keyword, page=page, timeout=timeout)
+
+    def explore(self, key: str, index: int = 0, timeout: int = 120) -> "CmdResult":
+        return self._run_cmd("explore", key, Path("."), index=index, timeout=timeout)
+
+    def info(self, key: str, comic_id: str, timeout: int = 120) -> "CmdResult":
+        return self._run_cmd("info", key, Path("."), comic_id=comic_id, timeout=timeout)
+
+    def pages(self, key: str, comic_id: str, ep_id: str, timeout: int = 120) -> "CmdResult":
+        return self._run_cmd("pages", key, Path("."), comic_id=comic_id, ep_id=ep_id, timeout=timeout)
 
 
 def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
@@ -386,6 +454,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
                runner: RunnerContext | None = None) -> SourceResult:
     """对单个源执行完整验收链路。P0-2: 先执行全部可执行阶段并保留事实, 末端归因。"""
     runner = runner or RunnerContext()
+    runner.js_path = js_path
     res = SourceResult(
         key=cfg.key,
         file_name=js_path.name,
@@ -413,8 +482,14 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
         return res
 
     # ---- load ----
-    r = rt.load_source(js_path)
+    r = runner.load_source(js_path)
     if not r.ok:
+        infra = runner_infra_error(r)
+        if infra:
+            res.add("load", *infra)
+            res.state = STATE_ERROR
+            res.error_code = infra[1]
+            return res
         res.add("load", STATE_FAIL, r.err_brief, r.elapsed_ms,
                 error_code="SOURCE_LOAD_ERROR", evidence={"evidence_type": "js_error"})
         res.state = STATE_FAIL
@@ -423,7 +498,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     res.add("load", STATE_PASS, "加载成功", r.elapsed_ms)
 
     # ---- metadata 与 index.json 对齐 ----
-    meta = rt.parse_loaded(r)
+    meta = (r.payload or {}).get("meta") or rt.parse_loaded(r)
     if not meta:
         res.add("metadata", STATE_FAIL, "无法从加载输出解析 key/name/version",
                 error_code="SOURCE_METADATA_MISMATCH")
@@ -447,11 +522,11 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
 
     # ---- search(或 explore 入口) ----
     if cfg.entry == "explore":
-        r = rt.explore(cfg.key, cfg.explore_index, vsa_cfg.timeout_stage)
+        r = runner.explore(cfg.key, cfg.explore_index, vsa_cfg.timeout_stage)
         stage = "search"
         label = f"explore[{cfg.explore_index}]"
     else:
-        r = rt.search(cfg.key, cfg.keyword, cfg.max_page, vsa_cfg.timeout_stage)
+        r = runner.search(cfg.key, cfg.keyword, cfg.max_page, vsa_cfg.timeout_stage)
         stage = "search"
         label = f"search '{cfg.keyword}'"
     if not r.ok:
@@ -498,7 +573,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     chapters = None
     info_detail_parts = []
     for cand_id, cand_title in info_attempts:
-        r = rt.info(cfg.key, cand_id, vsa_cfg.timeout_stage)
+        r = runner.info(cfg.key, cand_id, vsa_cfg.timeout_stage)
         if not r.ok:
             info_detail_parts.append(f"{cand_title}: {r.err_brief[:50]}")
             continue
@@ -511,6 +586,12 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
         info_detail_parts.append(f"{cand_title}: 章节为空")
         chapters = None
     if r is None or chapters is None or not isinstance(chapters, dict) or not chapters:
+        infra = runner_infra_error(r) if r else None
+        if infra:
+            res.add("info", *infra, elapsed_ms=r.elapsed_ms)
+            res.state = STATE_ERROR
+            res.error_code = infra[1]
+            return res
         state, code, evidence = classify_failure("info", (r.stderr if r else "") or "章节数据缺失", patterns)
         detail = "; ".join(info_detail_parts) or f"章节数据缺失: {str(payload)[:100]}"
         res.add("info", state, detail, r.elapsed_ms if r else 0, error_code=code, evidence=evidence)
@@ -561,7 +642,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     attempts = []
     used_ep_id = None
     for cand_id, cand_label in candidates:
-        r = rt.pages(cfg.key, comic_id, str(cand_id), vsa_cfg.timeout_stage)
+        r = runner.pages(cfg.key, comic_id, str(cand_id), vsa_cfg.timeout_stage)
         if r.ok:
             payload = r.json
             imgs = (payload or {}).get("data") or []
@@ -573,6 +654,12 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
         else:
             attempts.append(f"{cand_label}: {r.err_brief[:60]}")
     if not r or not images:
+        infra = runner_infra_error(r) if r else None
+        if infra:
+            res.add("pages", *infra, elapsed_ms=r.elapsed_ms if r else 0)
+            res.state = STATE_ERROR
+            res.error_code = infra[1]
+            return res
         state, code, evidence = classify_failure("pages", (r.stderr if r else "") or "; ".join(attempts), patterns)
         detail = "; ".join(attempts) or "pages 未执行"
         res.add("pages", state, detail, r.elapsed_ms if r else 0, error_code=code, evidence=evidence)
@@ -604,7 +691,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             runner.binary, js_path, cfg.key, comic_id, str(used_ep_id),
             runner.data_dir or Path("/tmp/vsa_data"), requested, vsa_cfg.timeout_image + 60,
             allow_local=allow_local)
-        if runner_payload.get("error_code") in ("RUNNER_PROTOCOL_ERROR", "RUNNER_EXCEPTION", "NETWORK_TIMEOUT"):
+        if runner_payload.get("error_code") in ("RUNNER_PROTOCOL_ERROR", "RUNNER_EXCEPTION"):
             if runner.strict:
                 res.add("image", STATE_ERROR,
                         f"Runner 协议/执行异常: {runner_payload.get('error', '')[:120]}",
@@ -621,6 +708,8 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             "images_available": runner_payload.get("available_image_count", 0),
             "images_attempted": runner_payload.get("attempted_image_count", 0),
             "images_verified": runner_payload.get("verified_image_count", 0),
+            "decoded_image_count": runner_payload.get("decoded_image_count", 0),
+            "unsupported_decode_count": runner_payload.get("unsupported_decode_count", 0),
         }
         if not runner_payload.get("ok"):
             first_bad = next((s for s in runner_payload.get("samples", []) if not s.get("verified")), {})
@@ -671,6 +760,7 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
                 error_code="", evidence={"evidence_type": "image", "counts": counts})
         res.state = STATE_PASS
         res.verification_level = level
+        res.evidence.update({"evidence_type": "image", "counts": counts})
         res.detail = "端到端通过(运行时动态头 + 真实图片字节)"
         return res
 

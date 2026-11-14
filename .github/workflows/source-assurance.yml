@@ -30,17 +30,7 @@ jobs:
       - name: Set up Dart SDK
         uses: dart-lang/setup-dart@v1
 
-      - name: Clone and build venera_cli runtime (pinned)
-        run: |
-          VSA_CLI_PIN="$(cat scripts/vsa/RUNTIME_PIN)"
-          echo "runtime_build_id=$VSA_CLI_PIN" >> "$GITHUB_ENV"
-          git clone https://github.com/venera-app/venera_cli.git /tmp/venera_cli
-          cd /tmp/venera_cli
-          git checkout --detach "$VSA_CLI_PIN"
-          dart pub get
-          dart build cli --target bin/venera.dart --output /tmp/venera
-
-      - name: Build VSA Dart runner (onImageLoad 动态头取图)
+      - name: Build VSA Dart runner (全链路验收执行器, onImageLoad 动态头取图)
         run: |
           cd scripts/vsa_dart
           dart pub get
@@ -51,10 +41,9 @@ jobs:
       - name: Coverage check (全源纳管, 无静默漏测)
         run: python scripts/source_assurance.py --check-coverage --output /tmp/vsa_out
 
-      - name: Run VSA live acceptance (strict)
+      - name: Run VSA live acceptance (strict, 全链路 runner 化)
         run: |
           python scripts/source_assurance.py --all \
-            --runtime /tmp/venera/bundle/bin/venera \
             --runner /tmp/vsa_runner/bundle/bin/vsa_runner \
             --data-dir /tmp/vsa_data \
             --output /tmp/vsa_out

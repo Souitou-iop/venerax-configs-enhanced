@@ -382,16 +382,19 @@ def main():
         # 离线 fixture 使用独立 CLI 数据目录(仅 5 个 fixture 源, 启动快且确定性;
         # live 共享 cli_home 以持久化 cookie/设备身份)
         home_dir = Path(args.data_dir) / ("cli_home_offline" if mode == "offline" else "cli_home")
+        # P0-A: 验收全链路已 runner 化, venera_cli 不再是必要组件;
+        # VeneraRuntime 仅保留作构建入口与旧字段兼容
         rt = VeneraRuntime(binary=Path(args.runtime), auto_build=args.build,
                            home_dir=home_dir)
-        rt.ensure()
         runner_binary = Path(args.runner)
         if not runner_binary.exists() and args.build and Path(args.runtime).exists():
             from vsa.runtime import VeneraRuntime as _R
             _R(Path(args.runtime), auto_build=False).build_runner()
-        # 严格模式下即使缺失也传入路径(错误信息要能指向真实配置路径)
+        # 严格模式下即使缺失也传入路径(错误信息要能指向真实配置路径);
+        # allow_local 仅 offline fixture 可用(本地 127.0.0.1 服务), live 恒为 False
         runner_ctx = RunnerContext(binary=runner_binary,
-                                   data_dir=Path(args.data_dir), strict=strict)
+                                   data_dir=Path(args.data_dir), strict=strict,
+                                   allow_local=(mode == "offline"))
         runner_ctx.data_dir.mkdir(parents=True, exist_ok=True)
         print(f"运行时: {rt.version} @ {rt.binary}", flush=True)
         print(f"runner: {'可用' if runner_ctx.binary else ('缺失' if strict else '缺失(诊断降级)')} @ {runner_binary} "

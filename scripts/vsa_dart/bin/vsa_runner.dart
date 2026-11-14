@@ -22,7 +22,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:image/image.dart' as imglib;
 import 'package:venera_core/venera_core.dart';
@@ -133,11 +132,40 @@ Future<String?> guardHost(String host, {bool allowLocal = false}) async {
   return null;
 }
 
+/// Origin = scheme + host + port(默认端口归一化)
+String originOf(Uri uri) {
+  final scheme = uri.scheme.toLowerCase();
+  final host = uri.host.toLowerCase();
+  final port = uri.port;
+  final defaultPort =
+      (scheme == 'https' && port == 443) || (scheme == 'http' && port == 80);
+  return defaultPort ? '$scheme://$host' : '$scheme://$host:$port';
+}
+
+/// 跨 Origin 跳转必须剥离的敏感头(小写比较)
+const sensitiveHeaders = {'authorization', 'cookie', 'proxy-authorization'};
+
+Map<String, String> headersForHop(
+    Map<String, String> headers, Uri from, Uri to) {
+  final sameOrigin = originOf(from) == originOf(to);
+  if (sameOrigin) return headers;
+  // 跨 Origin: 只保留非敏感头; Referer 跨域一并剥离, 防泄露路径/签名
+  final out = <String, String>{};
+  headers.forEach((k, v) {
+    final lk = k.toLowerCase();
+    if (sensitiveHeaders.contains(lk)) return;
+    if (lk == 'referer') return;
+    out[k] = v;
+  });
+  return out;
+}
+
 /// 带 URL/DNS 护栏的 GET: 手动逐跳跟随重定向, 每一跳重走护栏。
 Future<Response<List<int>>> guardedGet(
     Dio dio, String url, Map<String, String> headers,
     {bool allowLocal = false, int maxHops = 5}) async {
   var current = url;
+  var hopHeaders = headers;
   for (var hop = 0; hop <= maxHops; hop++) {
     final urlErr = guardUrl(current);
     if (urlErr != null) {
@@ -152,7 +180,7 @@ Future<Response<List<int>>> guardedGet(
     final response = await dio.get<List<int>>(
       current,
       options: Options(
-        headers: headers,
+        headers: hopHeaders,
         responseType: ResponseType.bytes,
         validateStatus: (_) => true,
         followRedirects: false,
@@ -163,7 +191,17 @@ Future<Response<List<int>>> guardedGet(
     if (code >= 300 && code < 400 && code != 304) {
       final location = response.headers.value('location');
       if (location == null) return response;
-      current = Uri.parse(current).resolve(location).toString();
+      final from = Uri.parse(current);
+      final to = from.resolve(location);
+      // HTTPS→HTTP 降级: 拒绝
+      if (from.scheme == 'https' && to.scheme == 'http') {
+        throw DioException.connectionError(
+            requestOptions: RequestOptions(path: current),
+            reason: 'URL_GUARD: 拒绝 HTTPS→HTTP 降级重定向');
+      }
+      // 跨 Origin: 剥离敏感头(每一跳重新计算)
+      hopHeaders = headersForHop(hopHeaders, from, to);
+      current = to.toString();
       continue;
     }
     return response;
@@ -176,30 +214,44 @@ Future<void> main(List<String> arguments) async {
   String? dataPath;
   String? loadFile;
   String? key;
+  String? cmd;
+  String? keyword;
   String? comicId;
   String? epId;
+  var page = 1;
+  var index = 0;
   var count = 2;
   var allowLocal = false;
   for (var i = 0; i < arguments.length; i++) {
     switch (arguments[i]) {
+      case '--cmd':
+        cmd = arguments[++i];
       case '--data':
         dataPath = arguments[++i];
       case '--load':
         loadFile = arguments[++i];
       case '--key':
         key = arguments[++i];
+      case '--keyword':
+        keyword = arguments[++i];
       case '--comic-id':
         comicId = arguments[++i];
       case '--ep-id':
         epId = arguments[++i];
+      case '--page':
+        page = int.tryParse(arguments[++i]) ?? 1;
+      case '--index':
+        index = int.tryParse(arguments[++i]) ?? 0;
       case '--count':
         count = int.tryParse(arguments[++i]) ?? 2;
       case '--allow-local':
         allowLocal = true;
     }
   }
-  if (dataPath == null || loadFile == null || key == null || comicId == null || epId == null) {
-    stderr.writeln('usage: vsa_runner --data <dir> --load <js> --key <key> --comic-id <id> --ep-id <id> [--count n] [--allow-local]');
+  if (dataPath == null || loadFile == null || key == null || cmd == null) {
+    stderr.writeln('usage: vsa_runner --cmd load|search|explore|info|pages|verify '
+        '--data <dir> --load <js> --key <key> [--keyword x] [--page n] [--index n] '
+        '[--comic-id id] [--ep-id id] [--count n] [--allow-local]');
     exit(64);
   }
   if (count < 1) count = 1;
@@ -241,7 +293,87 @@ Future<void> main(List<String> arguments) async {
     }
     final target = ComicSourceManager().find(key) ?? source;
 
-    final pages = await target.loadComicPages!(comicId, epId);
+    // 阶段子命令(load/search/explore/info/pages): 全部走受护栏 Dio,
+    // 输出与 venera CLI 同构的 JSON(chain.py 直接解析); verify 落到下方原逻辑。
+    if (cmd != 'verify') {
+      try {
+        switch (cmd) {
+          case 'load':
+            out['ok'] = true;
+            out['meta'] = {'key': target.key, 'name': target.name, 'version': target.version};
+            break;
+          case 'search':
+            final search = target.searchPageData;
+            if (search == null || search.loadPage == null) {
+              throw 'source $key does not support search';
+            }
+            final options = search.searchOptions
+                    ?.map((option) => option.defaultValue)
+                    .toList() ??
+                const [];
+            final res = await search.loadPage!(keyword ?? '', page, options);
+            if (res.error) throw res.errorMessage ?? 'search error';
+            out['ok'] = true;
+            out['data'] = (res.dataOrNull ?? const <Comic>[])
+                .map((e) => e.toJson())
+                .toList();
+            out['subData'] = res.subData;
+            break;
+          case 'explore':
+            if (target.explorePages.isEmpty || index >= target.explorePages.length) {
+              throw 'explore index out of range';
+            }
+            final explore = target.explorePages[index];
+            if (explore.loadPage != null) {
+              final res = await explore.loadPage!(page);
+              if (res.error) throw res.errorMessage ?? 'explore error';
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Comic>[])
+                  .map((e) => e.toJson())
+                  .toList();
+              out['subData'] = res.subData;
+            } else if (explore.loadMultiPart != null) {
+              final res = await explore.loadMultiPart!();
+              if (res.error) throw res.errorMessage ?? 'explore error';
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <ExplorePagePart>[])
+                  .map((part) => {
+                        'title': part.title,
+                        'comics': part.comics.map((e) => e.toJson()).toList(),
+                      })
+                  .toList();
+              out['subData'] = res.subData;
+            } else {
+              throw 'explore page $index is not supported by runner';
+            }
+            break;
+          case 'info':
+            final res = await target.loadComicInfo!(comicId ?? '');
+            if (res.error) throw res.errorMessage ?? 'info error';
+            out['ok'] = true;
+            out['data'] = res.dataOrNull!.toJson();
+            break;
+          case 'pages':
+            final res = await target.loadComicPages!(comicId ?? '', epId ?? '');
+            if (res.error) throw res.errorMessage ?? 'pages error';
+            out['ok'] = true;
+            out['data'] = res.dataOrNull ?? const <String>[];
+            break;
+          default:
+            throw 'unknown cmd: $cmd';
+        }
+        stdout.writeln(jsonEncode(out));
+        exit(0);
+      } catch (e) {
+        // 源级错误(JS 抛出的消息) → 上层按消息归因 FAIL/BLOCKED
+        out['ok'] = false;
+        out['error'] = '$e';
+        stdout.writeln(jsonEncode(out));
+        exit(1);
+      }
+    }
+
+    final pages = await target.loadComicPages!(comicId ?? '', epId ?? '');
     if (pages.error) {
       out['ok'] = false;
       out['error'] = 'loadEp: ${pages.errorMessage ?? 'unknown error'}';
@@ -275,7 +407,7 @@ Future<void> main(List<String> arguments) async {
       final sample = <String, dynamic>{'index': i};
       Map<String, dynamic> headerConfig = {};
       try {
-        final cfg = await target.getImageLoadingConfig?.call(imageUrl, comicId, epId);
+        final cfg = await target.getImageLoadingConfig?.call(imageUrl, comicId ?? '', epId ?? '');
         if (cfg != null) {
           headerConfig = cfg;
         }

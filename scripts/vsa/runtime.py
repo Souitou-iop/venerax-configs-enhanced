@@ -13,7 +13,7 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -38,6 +38,7 @@ class CmdResult:
     stdout: str
     stderr: str
     elapsed_ms: int
+    payload: dict = field(default_factory=dict)
 
     @property
     def json(self):
@@ -105,6 +106,12 @@ class VeneraRuntime:
                 check=True, capture_output=True,
             )
         pin = os.environ.get("VSA_CLI_PIN", "").strip()
+        if not pin:
+            pin_file = REPO_ROOT / "scripts/vsa/RUNTIME_PIN"
+            if pin_file.exists():
+                pin = pin_file.read_text().strip()
+        if not pin:
+            raise VsaRuntimeError("未提供 venera_cli pin: 设置 VSA_CLI_PIN 或 scripts/vsa/RUNTIME_PIN")
         if pin:
             subprocess.run(["git", "checkout", "--detach", pin], cwd=CLI_SRC, check=True, capture_output=True)
         subprocess.run(["dart", "pub", "get"], cwd=CLI_SRC, check=True, capture_output=True)

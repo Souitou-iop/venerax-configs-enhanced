@@ -61,6 +61,9 @@ def _img_bytes(cid: str, page: str) -> tuple[int, bytes] | None:
         return (200, _TINY_JPEG) if page == "1.jpg" else (200, _HTML_BODY)
     if cid == "neg-ssrf":
         return None
+    if cid == "mix-decode" and page == "2.img":
+        # 最小 AVIF(ftyp box): 字节签名可信但无解码器
+        return 200, b"\x00\x00\x00\x18ftypavif\x00\x00\x00\x00avifmif1"
     return 200, _TINY_JPEG
 
 
