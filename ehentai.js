@@ -17,7 +17,7 @@ class Ehentai extends ComicSource {
     // unique id of the source
     key = "ehentai"
 
-    version = "1.2.4"
+    version = "1.2.5"
 
     minAppVersion = "1.5.3"
 
@@ -174,7 +174,12 @@ class Ehentai extends ComicSource {
     }
 
     get baseUrl() {
-        return 'https://' + this.loadSetting("domain");
+        // 设置未初始化时 loadSetting 返回 undefined, 会拼出 https://undefined
+        let domain = this.loadSetting("domain")
+        if (typeof domain !== "string" || domain.trim() === "" || domain === "undefined") {
+            domain = "e-hentai.org"
+        }
+        return 'https://' + domain.trim()
     }
 
     get apiUrl() {
@@ -182,12 +187,12 @@ class Ehentai extends ComicSource {
     }
 
     getStarsFromPosition(position) {
+        // 空串/无分号时不能进入 while: position.length 为 0 时
+        // `i === position.length` 永远不成立 → 死循环卡死列表页
+        if (!position) return 0.5
         let i = 0;
-        while (position[i] !== ";") {
+        while (i < position.length && position[i] !== ";") {
             i++;
-            if (i === position.length) {
-                break;
-            }
         }
         switch (position.substring(0, i)) {
             case "background-position:0px -1px":
@@ -219,7 +224,8 @@ class Ehentai extends ComicSource {
         cookies.forEach((c) => {
             c.domain = '.exhentai.org'
         })
-        cookies.filter((item) => item.name !== 'igneous')
+        // 旧代码丢掉了 filter 的返回值, igneous 仍被带到 exhentai → 登录态无效
+        cookies = cookies.filter((item) => item.name !== 'igneous')
         Network.deleteCookies('https://exhentai.org')
         Network.setCookies('https://exhentai.org', cookies)
         throw `You may not have permission to access this page. Please check your network or try to login again.`
@@ -242,9 +248,10 @@ class Ehentai extends ComicSource {
      * @returns {Promise<{comics: Comic[], next: string?}>}
      */
     async getGalleries(url, isLeaderBoard) {
+        // 未 await 时异常会变成未处理的 Promise rejection, 用 catch 兜住
         try {
-            this.checkEHEvent();
-        } catch (_) {}
+            this.checkEHEvent().catch(() => {});
+        } catch (_) { }
         let t = isLeaderBoard ? 1 : 0;
         let res
         try {
@@ -562,17 +569,35 @@ class Ehentai extends ComicSource {
          * @returns {Promise<{comics: Comic[], maxPage: number}>}
          */
         loadNext: async (keyword, options, next) => {
-            let category = (options && options[0]) ? JSON.parse(options[0]) : [];
-            let stars = options[1];
-            let language = options[2];
-            let expunged = options[3];
-            let torrentOnly = options[4];
-            let fcats = 1023
-            if (!Array.isArray(category)) {
-                category = [category];
+            // 各 App 版本把「多选/下拉」的未选值传成 null / "" / [] / "null" 都有可能，
+            // 统一成数组/字符串再判断，避免 JSON.parse("4") 这类非数组值抛错。
+            options = Array.isArray(options) ? options : (options == null ? [] : [options]);
+            let stars = options[1] || null;
+            let language = options[2] || null;
+            let expunged = options[3] || null;
+            let torrentOnly = options[4] || null;
+            let category = []
+            let rawCategory = options[0]
+            if (Array.isArray(rawCategory)) {
+                category = rawCategory
+            } else if (typeof rawCategory === "string" && rawCategory.trim() !== "" && rawCategory.trim() !== "null") {
+                try {
+                    let parsed = JSON.parse(rawCategory)
+                    category = Array.isArray(parsed) ? parsed : [parsed]
+                } catch (e) {
+                    // 兼容直接传单个分类编号的情况
+                    category = [rawCategory]
+                }
             }
-            for(let c of category) {
-                fcats -= 1 << Number(c)
+            // 默认全选(10 个分类), 仅在用户显式收窄时才累加排除掩码
+            let fcats = 1023
+            if (category.length > 0) {
+                for(let c of category) {
+                    let n = Number(c)
+                    if (!isNaN(n) && n >= 0 && n <= 9) {
+                        fcats -= 1 << n
+                    }
+                }
             }
             if(language && !keyword.includes("language:")) {
                 keyword += ` language:${language}`
@@ -722,7 +747,7 @@ class Ehentai extends ComicSource {
          */
         loadFolders: async (comicId) => {
             try {
-                this.checkEHEvent();
+                this.checkEHEvent().catch(() => {});
             } catch (_) {}
             let res = await Network.get(`${this.baseUrl}/favorites.php`, this.webHeaders);
             if (res.status !== 200) {
@@ -775,7 +800,7 @@ class Ehentai extends ComicSource {
          */
         loadInfo: async (id) => {
             try {
-                this.checkEHEvent();
+                this.checkEHEvent().catch(() => {});
             } catch (_) {}
             let res = await Network.get(id, {
                 ...this.webHeaders,
@@ -829,7 +854,8 @@ class Ehentai extends ComicSource {
             let maxPage = "1"
             for(let element of document.querySelectorAll("td.gdt2")) {
                 if (element.text.includes("page")) {
-                    maxPage = element.text.match(/\d+/)[0];
+                    let m = element.text.match(/\d+/);
+                    maxPage = m ? m[0] : maxPage;
                 }
             }
 
@@ -848,8 +874,10 @@ class Ehentai extends ComicSource {
                 folder = (Number(position-2) / 19).toString()
             }
 
-            let coverPath = document.querySelector("div#gleft > div#gd1 > div").attributes["style"];
-            coverPath = RegExp("https?://([-a-zA-Z0-9.]+(/\\S*)?\\.(?:jpg|jpeg|gif|png|webp))").exec(coverPath)[0];
+            let coverPath = document.querySelector("div#gleft > div#gd1 > div")?.attributes["style"] ?? "";
+            // 封面 style 里没图(改版/占位图)时 exec 返回 null, 直接取 [0] 会让整个详情页失败
+            let coverMatch = RegExp("https?://([-a-zA-Z0-9.]+(/\\S*)?\\.(?:jpg|jpeg|gif|png|webp))").exec(coverPath);
+            coverPath = coverMatch ? coverMatch[0] : "";
 
             let uploader = document.getElementById("gdn")?.children[0]?.text
 
@@ -889,9 +917,13 @@ class Ehentai extends ComicSource {
                 descParts.push(`Favorited ${favCount}`);
             }
             
-            let time = document.querySelector("div#gdd > table > tr > td.gdt2, div#gdd > table > tbody > tr > td.gdt2").text
+            let time = document.querySelector("div#gdd > table > tr > td.gdt2, div#gdd > table > tbody > tr > td.gdt2")?.text ?? ""
 
             let script = document.querySelectorAll("script").find((e) => e.text.includes("var token"));
+            // 登录页/警告页/改版页没有这段 script, 直接取 text 会抛 TypeError
+            if (!script) {
+                throw "Failed to parse gallery detail: token script not found"
+            }
             let reg = RegExp("var\\s+(\\w+)\\s*=\\s*(.*?);", "g");
             let variables = new Map();
             for(let match of script.text.matchAll(reg)) {
@@ -1140,7 +1172,11 @@ class Ehentai extends ComicSource {
                     })
                     let json = JSON.parse(res.body)
                     let i6 = json.i6
-                    let reg = RegExp("nl\\('(.+?)'\\)").exec(i6)
+                    let reg = RegExp("nl\\('(.+?)'\\)").exec(i6 ?? "")
+                    // 配额/错误页的 i6 里没有 nl('...'), 取 [1] 会抛 TypeError
+                    if (!reg) {
+                        throw "Failed to parse image page (quota exceeded or unexpected response)"
+                    }
                     nl = reg[1]
                     let image = json.i3
                     image = image.substring(image.indexOf("src=\"") + 5, image.indexOf("\" style"))
@@ -1201,7 +1237,9 @@ class Ehentai extends ComicSource {
                 if(isNaN(score)) {
                     score = null
                 }
-                let id = c.previousElementSibling?.attributes['name']?.match(/\d+/)[0] ?? '0'
+                // `?.match(...)[0]` 只保护到 match 之前: match 为 null 时 [0] 仍会抛 TypeError
+                let idMatch = c.previousElementSibling?.attributes['name']?.match(/\d+/)
+                let id = idMatch ? idMatch[0] : '0'
                 let isUp = c.querySelector(`a#comment_vote_up_${id}`)?.attributes['style']?.length > 0
                 let isDown = c.querySelector(`a#comment_vote_down_${id}`)?.attributes['style']?.length > 0
 

@@ -449,7 +449,15 @@ async function getGalleryIdsAndCount({ range, state }) {
   if (resp.status !== 200 && resp.status !== 206) throw `failed fetch: ${resp.status}`;
 
   let itemCount = 0;
-  const total = parseInt((resp.headers["content-range"] || "").replace(/^[Bb]ytes \d+-\d+\//, ""));
+  // 不同引擎/版本的头部大小写不一致, 统一小写后再取
+  const header = (name) => {
+    const target = name.toLowerCase();
+    for (const k of Object.keys(resp.headers || {})) {
+      if (k.toLowerCase() === target) return resp.headers[k];
+    }
+    return "";
+  };
+  const total = parseInt(String(header("content-range")).replace(/^[Bb]ytes \d+-\d+\//, ""));
   if (!isNaN(total) && total > 0) itemCount = total / 4;
 
   const bytes = resp.body ? new Uint8Array(resp.body) : new Uint8Array(0);
@@ -630,7 +638,7 @@ async function search(options) {
     return { type: "single", gids: galleryids, count, state };
   }
 
-  if (simpleSingle && !options.term.trim() && options.orderbydirection === "desc") {
+  if (simpleSingle && !String(options.term ?? "").trim() && options.orderbydirection === "desc") {
     const { galleryids, count } = await getSingleTagSearchPage(state, 0);
     return { type: "single", gids: galleryids, count, state };
   }
@@ -894,7 +902,7 @@ function getThumbnailUrl(hash, bigTn) {
 class Hitomi extends ComicSource {
   name = "hitomi.la";
   key = "hitomi";
-  version = "2.0.0";
+  version = "2.0.1";
   minAppVersion = "1.4.6";
   url = "https://cdn.jsdelivr.net/gh/senran-N/venera-configs@main/hitomi.js";
 
@@ -984,9 +992,11 @@ class Hitomi extends ComicSource {
 
   categoryComics = {
     load: async (category, param, options, page) => {
-      const term = param;
+      // 标签跳转/分类未带 param 时 param 可能是 null, term.includes 会抛 TypeError
+      const term = param ?? "";
       if (!term.includes(":")) throw new Error("不合法的标签，请使用namespace:tag的格式");
       if (page === 1) {
+        options = Array.isArray(options) ? options : (options == null ? [] : [options]);
         const option = parseInt(options[0]);
         const searchOptions = {
           term,
@@ -1021,25 +1031,33 @@ class Hitomi extends ComicSource {
             break;
         }
         const result = await search(searchOptions);
+        // 缓存带上 term+排序, 否则先开 A 分类第1页再翻 B 分类第2页会串到 A 的 gids
+        const cacheKey = term + "|" + option;
         if (result.type === "single") {
           const comics = (await getGalleryBlocks(result.gids)).map((n) => this._mapBlock(n));
-          this.categoryResultCache = { type: "single", state: result.state, count: result.count };
+          this.categoryResultCache = { key: cacheKey, type: "single", state: result.state, count: result.count };
           return { comics, maxPage: Math.ceil(result.count / 25) };
         }
         const comics = (await getGalleryBlocks(result.gids.slice(25 * page - 25, 25 * page))).map((n) => this._mapBlock(n));
-        this.categoryResultCache = { type: "all", gids: result.gids, count: result.count };
+        this.categoryResultCache = { key: cacheKey, type: "all", gids: result.gids, count: result.count };
         return { comics, maxPage: Math.ceil(result.count / 25) };
       }
 
-      if (this.categoryResultCache.type === "single") {
-        const result = await getSingleTagSearchPage(this.categoryResultCache.state, page - 1);
+      const cache = this.categoryResultCache;
+      if (!cache) throw new Error("分类会话已失效，请返回第一页");
+      // 翻页时校验缓存仍是当前分类, 避免跨分类串数据
+      if (cache.key !== undefined && cache.key !== term + "|" + (options[0] ?? 0)) {
+        throw new Error("分类会话已失效，请返回第一页");
+      }
+      if (cache.type === "single") {
+        const result = await getSingleTagSearchPage(cache.state, page - 1);
         const comics = (await getGalleryBlocks(result.galleryids)).map((n) => this._mapBlock(n));
-        return { comics, maxPage: Math.ceil(this.categoryResultCache.count / 25) };
+        return { comics, maxPage: Math.ceil(cache.count / 25) };
       }
       const comics = (
-        await getGalleryBlocks(this.categoryResultCache.gids.slice(25 * page - 25, 25 * page))
+        await getGalleryBlocks(cache.gids.slice(25 * page - 25, 25 * page))
       ).map((n) => this._mapBlock(n));
-      return { comics, maxPage: Math.ceil(this.categoryResultCache.count / 25) };
+      return { comics, maxPage: Math.ceil(cache.count / 25) };
     },
     optionList: [
       {
@@ -1079,6 +1097,8 @@ class Hitomi extends ComicSource {
 
   search = {
     load: async (keyword, options, page) => {
+      // 部分调用路径(如标签点击跳转)不会带 optionList, options 可能是 null/undefined
+      options = Array.isArray(options) ? options : (options == null ? [] : [options]);
       const cacheKey = (keyword || "") + "|" + options.join(",");
       if (page === 1) {
         const option = parseInt(options[0]);

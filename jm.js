@@ -7,7 +7,7 @@ class JM extends ComicSource {
     // unique id of the source
     key = "jm"
 
-    version = "1.4.3"
+    version = "1.4.4"
 
     minAppVersion = "1.5.0"
 
@@ -252,11 +252,12 @@ class JM extends ComicSource {
         let title = comic.name
         let description = comic.description ?? ""
         let cover = this.getCoverUrl(id)
-        let tags =[]
-        if(comic["category"]["title"]) {
+        let tags = []
+        // 禁漫書庫 / 小說 等板塊的條目沒有 category 字段, 直接取會拋錯
+        if (comic["category"] && comic["category"]["title"]) {
             tags.push(comic["category"]["title"])
         }
-        if(comic["category_sub"]["title"]) {
+        if (comic["category_sub"] && comic["category_sub"]["title"]) {
             tags.push(comic["category_sub"]["title"])
         }
         return new Comic({
@@ -338,7 +339,8 @@ class JM extends ComicSource {
         let res = await Network.get(url, this.getApiHeaders(time))
         if(res.status !== 200) {
             if(res.status === 401) {
-                let json = JSON.parse(res.body)
+                let json = {}
+                try { json = JSON.parse(res.body) } catch (e) { /* 部分分流 401 返回 html */ }
                 let message = json.errorMsg
                 let error = new Error(message === "請先登入會員" && this.isLogged ? 'Login expired' : (message ?? 'Invalid Status Code: ' + res.status))
                 error.noFailover = true
@@ -346,7 +348,13 @@ class JM extends ComicSource {
             }
             throw new Error('Invalid Status Code: ' + res.status)
         }
-        let json = JSON.parse(res.body)
+        let json
+        try {
+            json = JSON.parse(res.body)
+        } catch (e) {
+            // 分流返回了 html/空页, 换下一条线路再试
+            throw new Error('Invalid Response')
+        }
         let data = json.data
         if(typeof data !== 'string') {
             let error = new Error('Invalid Data')
@@ -365,7 +373,8 @@ class JM extends ComicSource {
         }, body)
         if(res.status !== 200) {
             if(res.status === 401) {
-                let json = JSON.parse(res.body)
+                let json = {}
+                try { json = JSON.parse(res.body) } catch (e) { /* ignore */ }
                 let message = json.errorMsg
                 if(message === "請先登入會員" && this.isLogged) {
                     throw 'Login expired'
@@ -374,7 +383,12 @@ class JM extends ComicSource {
             }
             throw 'Invalid Status Code: ' + res.status
         }
-        let json = JSON.parse(res.body)
+        let json
+        try {
+            json = JSON.parse(res.body)
+        } catch (e) {
+            throw 'Invalid Response'
+        }
         let data = json.data
         if(typeof data !== 'string') {
             throw 'Invalid Data'
@@ -797,12 +811,24 @@ class JM extends ComicSource {
                 "0": this.translate("All")
             }
             let json = JSON.parse(res)
-            for (let e of json.folder_list) {
+            // 未登录/空收藏夹时接口可能不返回 folder_list
+            for (let e of (json.folder_list ?? [])) {
                 folders[e.FID.toString()] = e.name
+            }
+            // 传入 comicId 时应返回该漫画所属的收藏夹, 否则 App 无法显示已收藏状态
+            let favorited = []
+            if (comicId) {
+                for (let e of (json.list ?? [])) {
+                    let cid = e.id ?? e.aid
+                    if (cid != null && String(cid) === String(comicId)) {
+                        let fid = e.fid ?? e.FID
+                        if (fid != null) favorited.push(String(fid))
+                    }
+                }
             }
             return {
                 folders: folders,
-                favorited: []
+                favorited: favorited
             }
         },
         /**
@@ -829,12 +855,14 @@ class JM extends ComicSource {
          * @returns {Promise<{comics: Comic[], maxPage: number}>}
          */
         loadComics: async (page, folder) => {
-            let order = this.loadSetting('favoriteOrder')
+            // 设置未初始化时 loadSetting 返回 undefined, 请求会变成 o=undefined
+            let order = this.loadSetting('favoriteOrder') || 'mr'
             let res = await this.get(`${this.baseUrl}/favorite?folder_id=${folder}&page=${page}&o=${order}`)
             let json = JSON.parse(res)
-            let total = json.total
-            let maxPage = Math.ceil(total / 20)
-            let comics = json.list.map((e) => this.parseComic(e))
+            let total = Number(json.total) || 0
+            let maxPage = Math.max(1, Math.ceil(total / 20))
+            // 空收藏夹时接口不返回 list
+            let comics = (json.list ?? []).map((e) => this.parseComic(e))
             return {
                 comics: comics,
                 maxPage: maxPage
@@ -916,6 +944,9 @@ class JM extends ComicSource {
         loadEp: async (comicId, epId) => {
             let res = await this.get(`${this.baseUrl}/chapter?id=${epId}`);
             let data = JSON.parse(res)
+            if (!Array.isArray(data.images) || data.images.length === 0) {
+                throw new Error('No images found in this chapter')
+            }
             let images = data.images.map((e) => this.getImageUrl(epId, e))
             return {
                 images: images
@@ -930,16 +961,14 @@ class JM extends ComicSource {
          */
         onImageLoad: (url, comicId, epId) => {
             const scrambleId = 220980
-            let pictureName = "";
-            for (let i = url.length - 1; i >= 0; i--) {
-                if (url[i] === '/') {
-                    pictureName = url.substring(i + 1, url.length - 5);
-                    break;
-                }
-            }
+            // 取文件名再去扩展名: 部分旧章节仍是 .jpg/.png/.gif,
+            // 旧实现固定截掉末尾 4 个字符(按 .webp 假设), 会算错散列 → 图片错位
+            let name = url.substring(url.lastIndexOf('/') + 1)
+            let dot = name.lastIndexOf('.')
+            let pictureName = dot > 0 ? name.substring(0, dot) : name
             epId = Number(epId);
             let num = 0
-            if(epId < scrambleId) {
+            if(isNaN(epId) || epId < scrambleId) {
                 num = 0
             } else if (epId < 268850) {
                 num = 10
@@ -1024,8 +1053,9 @@ class JM extends ComicSource {
             let json = JSON.parse(res)
             // the forum api returns 10 comments per page
             const pageSize = 10
+            let total = Number(json.total) || 0
             return {
-                comments: json.list.map((e) => {
+                comments: (json.list ?? []).map((e) => {
                     let content = e.content ?? ''
                     let start = content.indexOf('>')
                     let end = content.lastIndexOf('<')
@@ -1039,7 +1069,7 @@ class JM extends ComicSource {
                         content: content,
                     })
                 }),
-                maxPage: Math.max(1, Math.ceil(json.total / pageSize))
+                maxPage: Math.max(1, Math.ceil(total / pageSize))
             }
         },
         /**

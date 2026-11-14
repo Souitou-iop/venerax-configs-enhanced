@@ -66,14 +66,14 @@
     "name": "禁漫天堂",
     "fileName": "jm.js",
     "key": "jm",
-    "version": "1.4.3",
+    "version": "1.4.4",
     "description": "18comic核心站：支持官方5条线路自动故障转移、12h域名缓存与打乱算法对齐"
   },
   {
     "name": "Picacg / 哔咔",
     "fileName": "picacg.js",
     "key": "picacg",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "description": "需登录使用：专题接口、搜索分类筛选、401 重登录与评论签名修正；登录后正文尚未验证",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/picacg.js"
   },
@@ -81,7 +81,7 @@
     "name": "E-Hentai",
     "fileName": "ehentai.js",
     "key": "ehentai",
-    "version": "1.2.4",
+    "version": "1.2.5",
     "description": "国际顶级同人画廊：修复非标准 DOM 空列表崩溃与 taglist 解析，注入防封请求头",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/ehentai.js"
   },
@@ -96,14 +96,14 @@
     "name": "hitomi.la",
     "fileName": "hitomi.js",
     "key": "hitomi",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "高清图库：集成 galleryblock/nozomi LRU 缓存与 B-tree 搜索去重加速"
   },
   {
     "name": "紳士漫畫",
     "fileName": "wnacg.js",
     "key": "wnacg",
-    "version": "2.0.0",
+    "version": "2.0.2",
     "description": "紳士漫畫：修复移动端UA选择器崩溃，支持标题作者/社团提取与4重搜索排序"
   },
   {

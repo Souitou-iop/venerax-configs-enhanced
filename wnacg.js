@@ -53,7 +53,7 @@
 class Wnacg extends ComicSource {
     name = "紳士漫畫"
     key = "wnacg"
-    version = "2.0.0"
+    version = "2.0.2"
     minAppVersion = "1.6.0"
     url = "https://cdn.jsdelivr.net/gh/senran-N/venera-configs@main/wnacg.js"
 
@@ -272,10 +272,38 @@ class Wnacg extends ComicSource {
         }
     }
 
-    // 列表項解析：兼容 li.gallary_item 與裸 div.pic_box
+    // 列表項解析：兼容 li.gallary_item 與裸 div.pic_box，以及移動版 li（a.ImgA + a.txtA + span.info）
     _parseComic(el) {
+        // 移動版入口：li 內含 a.ImgA（桌面版 li.gallary_item 沒有 ImgA，不會誤觸）
+        if (el.querySelector && el.querySelector("a.ImgA")) {
+            let imgA = el.querySelector("a.ImgA")
+            let href = imgA.attributes["href"] || ""
+            let id = this._aid(href)
+            if (!id) throw "Invalid comic id"
+            let img = imgA.querySelector("img")
+            let cover = img ? (img.attributes["src"] || img.attributes["data-src"] || "") : ""
+            // 移動版列表把標題放在 a.ImgA 內的覆蓋層 span（無 a.txtA），舊版只看 a.txtA → 標題全空
+            let titleEl = el.querySelector("a.txtA") || imgA.querySelector("span")
+            let title = titleEl ? titleEl.text : ""
+            if (!title) title = imgA.attributes["title"] || ""
+            if (!title && img) title = img.attributes["alt"] || ""
+            title = this._stripTags(title)
+            let infoEl = el.querySelector("span.info")
+            let info = infoEl ? this._clean(infoEl.text) : ""
+            return new Comic({
+                id: id,
+                title: title,
+                subtitle: info,
+                cover: this._normImg(cover),
+                description: "",
+            })
+        }
+
         let box = null
-        if (el.localName === "div" && (el.classNames || []).indexOf("pic_box") >= 0) {
+        // 排行榜條目：div.itemBox > div.itemImg > a[href] + div.itemTxt (a.title / span.pd / span.date)
+        if (el.localName === "div" && (el.classNames || []).indexOf("itemBox") >= 0) {
+            box = el
+        } else if (el.localName === "div" && (el.classNames || []).indexOf("pic_box") >= 0) {
             box = el
         } else {
             box = el.querySelector("div.pic_box") || el
@@ -294,14 +322,30 @@ class Wnacg extends ComicSource {
                 img.attributes["data-original"] || ""
         }
 
-        let titleEl = el.querySelector("div.info div.title a") || el.querySelector("div.title a")
+        // 標題：a.title（排行榜） / div.info div.title a（桌面列表） / 連結或封面的 title|alt
+        let titleEl = el.querySelector("div.info div.title a") || el.querySelector("div.title a") ||
+            el.querySelector("a.title")
         let title = titleEl ? titleEl.text : ""
         if (!title && link) title = link.attributes["title"] || ""
         if (!title && img) title = img.attributes["alt"] || ""
         title = this._stripTags(title)
 
+        // 副標題：桌面列表的 info_col；排行榜為 span.pd 們（頁數/收藏/分類）+ span.date
         let infoEl = el.querySelector("div.info div.info_col") || el.querySelector("div.info_col")
         let info = infoEl ? this._clean(infoEl.text) : ""
+        if (!info) {
+            let parts = []
+            for (let s of el.querySelectorAll("span.pd")) {
+                let t = this._clean(s.text)
+                if (t && parts.indexOf(t) < 0) parts.push(t)
+            }
+            let dateEl = el.querySelector("span.date")
+            if (dateEl) {
+                let d = this._clean(dateEl.text)
+                if (d) parts.push(d)
+            }
+            info = parts.join(" · ")
+        }
 
         return new Comic({
             id: id,
@@ -336,6 +380,26 @@ class Wnacg extends ComicSource {
             }
         }
 
+        // 移動版兜底：li 條目內含 a.ImgA
+        if (comics.length === 0) {
+            for (let item of doc.querySelectorAll("li")) {
+                try {
+                    let c = this._parseComic(item)
+                    if (c) comics.push(c)
+                } catch (e) { /* skip */ }
+            }
+        }
+
+        // 排行榜兜底：div.itemBox（div.itemImg > a + div.itemTxt > a.title）
+        if (comics.length === 0) {
+            for (let box of doc.querySelectorAll("div.itemBox")) {
+                try {
+                    let c = this._parseComic(box)
+                    if (c) comics.push(c)
+                } catch (e) { /* skip */ }
+            }
+        }
+
         return { comics: comics, maxPage: this._parseMaxPage(doc) }
     }
 
@@ -344,6 +408,9 @@ class Wnacg extends ComicSource {
         let max = 1
         let paginators = doc.querySelectorAll("div.f_left.paginator")
         if (paginators.length === 0) paginators = doc.querySelectorAll("div.paginator")
+        // 移動版列表頁的翻頁器是 div.page（無 paginator class），舊版只認前兩者 → maxPage 恆為 1
+        if (paginators.length === 0) paginators = doc.querySelectorAll("div.page")
+        if (paginators.length === 0) paginators = doc.querySelectorAll("div.pagination")
 
         for (let p of paginators) {
             let nums = []
@@ -369,6 +436,10 @@ class Wnacg extends ComicSource {
     // 分類/標籤/更新列表 path -> 指定頁 URL
     _listUrl(param, page) {
         param = (param || "/albums.html").trim()
+        // 「更多>>」可能是絕對 URL 或協議相對 URL, 直接補 "/" 會拼成
+        // https://host/https://host/... → 分類頁 404
+        let abs = /^(?:https?:)?\/\/([^\/]+)(\/.*)?$/i.exec(param)
+        if (abs) param = abs[2] || "/"
         if (!param.startsWith("/")) param = "/" + param
         if (!page || page <= 1) return this.baseUrl + param
 
@@ -492,6 +563,8 @@ class Wnacg extends ComicSource {
             let res = await this._request("post", "/users-check_login.html", {
                 headers: { "content-type": "application/x-www-form-urlencoded" },
                 data: `normal=1&login_name=${encodeURIComponent(account)}&login_pass=${encodeURIComponent(pwd)}&remember_pass=1`,
+                // 寫操作不能跨鏡像重試, 否則會把帳密重複提交給多個鏡像
+                noFailover: true,
             })
             if (res.status !== 200) throw `Login failed (HTTP ${res.status})`
             let json = this._tryJson(res.body)
@@ -579,6 +652,37 @@ class Wnacg extends ComicSource {
                                     attributes: { category: "最新更新", param: "/albums.html" },
                                 },
                             })
+                        }
+                    }
+
+                    // 移動版兜底：div.imgBox（Sub_H2 板塊標題 + col_3_2 條目）
+                    if (result.length === 0) {
+                        for (let box of doc.querySelectorAll("div.imgBox")) {
+                            let titleEl = box.querySelector("span.Title")
+                            let title = titleEl ? titleEl.text.trim() : ""
+                            if (!title) continue
+                            let comics = []
+                            for (let item of box.querySelectorAll("li")) {
+                                try {
+                                    let c = this._parseComic(item)
+                                    if (c) comics.push(c)
+                                } catch (e) { /* skip */ }
+                            }
+                            if (comics.length === 0) continue
+                            let part = { title: title, comics: comics }
+                            try {
+                                let moreA = box.querySelector("div.Sub_H2 a[href]")
+                                if (moreA) {
+                                    let href = moreA.attributes["href"] || ""
+                                    if (href) {
+                                        part.viewMore = {
+                                            page: "category",
+                                            attributes: { category: title, param: href },
+                                        }
+                                    }
+                                }
+                            } catch (e) { /* ignore */ }
+                            result.push(part)
                         }
                     }
                     return result
@@ -909,6 +1013,152 @@ class Wnacg extends ComicSource {
             id = this._aid(id) || id
             let doc = await this._fetchDoc(`/photos-index-aid-${id}.html`)
             try {
+                // ── 新版移動模板 B：div.Introduct / BarTit / dv-tag / dv-desc-text ──
+                let intro = doc.querySelector("div.Introduct")
+                if (intro) {
+                    let titleEl = doc.querySelector("div.BarTit")
+                    let title = titleEl ? this._clean(titleEl.text) : ""
+                    if (!title) throw "Failed to load comic info"
+
+                    let coverImg = doc.querySelector("div.pic img") || doc.querySelector("div.pic#Cover img")
+                    let cover = ""
+                    if (coverImg) cover = this._normImg(coverImg.attributes["data-src"] || coverImg.attributes["src"] || "")
+
+                    // 分類 / 頁數 / 上傳者
+                    let category = "", pagesRaw = "", uploader = ""
+                    for (let p of doc.querySelectorAll("p.txtItme")) {
+                        let t = this._clean(p.text)
+                        if (!t) continue
+                        let a = p.querySelector("a.pd.introName")
+                        if (a) { uploader = this._clean(a.text); continue }
+                        if (p.querySelector("span.date")) { pagesRaw = this._clean(p.querySelector("span.date").text); continue }
+                        let catA = p.querySelector("a.pd")
+                        if (catA && !category) category = this._clean(catA.text)
+                    }
+                    let pagesNum = 0
+                    let pm = /(\d+)/.exec(pagesRaw)
+                    if (pm) pagesNum = parseInt(pm[1])
+
+                    // 標籤
+                    let tags = new Map()
+                    if (category) tags.set("分類", [category])
+                    if (pagesRaw) tags.set("頁數", [pagesRaw])
+                    let tagList = []
+                    for (let a of doc.querySelectorAll("a.dv-tag")) {
+                        let t = this._clean(a.text)
+                        if (t) tagList.push(t)
+                    }
+                    if (tagList.length > 0) tags.set("標籤", tagList)
+
+                    // 簡介
+                    let descEl = doc.querySelector("div.dv-desc-text")
+                    let description = descEl ? this._clean(descEl.text) : ""
+                    if (description === "暫無簡介" || description === "无简介") description = ""
+
+                    let author = uploader
+                    if (author) tags.set("作者", [author])
+                    if (!author) {
+                        let am = /\[([^\[\]]+)\]/.exec(title)
+                        if (am) author = am[1].trim()
+                        if (author) tags.set("作者", [author])
+                    }
+
+                    // 章節：原站多為單畫廊
+                    let chapters = new Map()
+                    for (let a of doc.querySelectorAll("a[href*='-aid-']")) {
+                        if ((a.classNames || []).some((c) => c.indexOf("rec") >= 0)) continue
+                        let cid = this._aid(a.attributes["href"])
+                        if (!cid || cid === String(id)) continue
+                        let t = this._clean(a.text)
+                        if (!t) continue
+                        chapters.set(cid, t)
+                    }
+                    if (chapters.size === 0) chapters.set(String(id), title)
+
+                    return new ComicDetails({
+                        id: String(id),
+                        title: title,
+                        subtitle: author || undefined,
+                        cover: cover,
+                        tags: tags,
+                        description: description,
+                        uploader: uploader || undefined,
+                        maxPage: pagesNum || undefined,
+                        thumbnails: null,
+                        url: `${this.baseUrl}/photos-index-aid-${id}.html`,
+                        chapters: chapters,
+                    })
+                }
+
+                // ── 新版移動模板：div.album-title / album-author / ul li meta / span.tags ──
+                let newTitleEl = doc.querySelector("div.album-title")
+                if (newTitleEl) {
+                    let title = this._clean(newTitleEl.text)
+                    if (!title) throw "Failed to load comic info"
+
+                    let cover = ""
+                    let coverImg = doc.querySelector("img")
+                    if (coverImg) cover = this._normImg(coverImg.attributes["data-src"] || coverImg.attributes["src"] || "")
+
+                    // ul li：動畫&漫畫 / 創建於2026-10-09 / 29頁
+                    let category = "", pagesRaw = ""
+                    for (let li of doc.querySelectorAll("ul li")) {
+                        let t = this._clean(li.text)
+                        if (/頁/.test(t) && !pagesRaw) pagesRaw = t
+                        else if (t && !category && !/頁/.test(t) && !/創建/.test(t)) category = t
+                    }
+                    let pagesNum = 0
+                    let pm = /(\d+)/.exec(pagesRaw)
+                    if (pm) pagesNum = parseInt(pm[1])
+
+                    let tags = new Map()
+                    if (category) tags.set("分類", [category])
+                    if (pagesRaw) tags.set("頁數", [pagesRaw])
+                    let tagList = []
+                    for (let a of doc.querySelectorAll("span.tags a")) {
+                        let t = this._clean(a.text)
+                        if (t) tagList.push(t)
+                    }
+                    if (tagList.length > 0) tags.set("標籤", tagList)
+
+                    let authorEl = doc.querySelector("span.album-author a")
+                    let author = authorEl ? this._clean(authorEl.text) : ""
+                    if (!author) {
+                        let am = /\[([^\[\]]+)\]/.exec(title)
+                        if (am) author = am[1].trim()
+                    }
+                    if (author) tags.set("作者", [author])
+
+                    // 簡介（移動模板無獨立簡介，留空）
+                    let description = ""
+
+                    // 章節：單畫廊為主；若有其他 aid 連結則視為章節。
+                    // 必須排除相關/推薦位(rec*)，否則會把推薦的本子當成章節
+                    let chapters = new Map()
+                    for (let a of doc.querySelectorAll("a[href*='-aid-']")) {
+                        if ((a.classNames || []).some((c) => c.indexOf("rec") >= 0)) continue
+                        let cid = this._aid(a.attributes["href"])
+                        if (!cid || cid === String(id)) continue
+                        let t = this._clean(a.text)
+                        if (!t) continue
+                        chapters.set(cid, t)
+                    }
+                    if (chapters.size === 0) chapters.set(String(id), title)
+
+                    return new ComicDetails({
+                        id: String(id),
+                        title: title,
+                        subtitle: author || undefined,
+                        cover: cover,
+                        tags: tags,
+                        description: description,
+                        maxPage: pagesNum || undefined,
+                        thumbnails: null,
+                        url: `${this.baseUrl}/photos-index-aid-${id}.html`,
+                        chapters: chapters,
+                    })
+                }
+
                 let titleEl = doc.querySelector("div.userwrap h2") ||
                     doc.querySelector("#bodywrap h2") || doc.querySelector("h2")
                 let title = this._clean(titleEl ? titleEl.text : "")
