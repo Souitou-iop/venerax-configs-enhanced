@@ -221,6 +221,17 @@ for key, name, url, advice in (
     ('hipmh', '嬉皮漫画', 'https://hipapi1.s3file.top/v1/home', '独立 API 章节解密与正文图片已本地验证。'),
     ('wmanhua', 'W漫画', 'https://www.wmanhua.com/', '公开搜索、详情与正文图片已本地验证。'),
     ('shenqimanhua', '神奇漫画', 'https://shenqimanhua.net/', '公开搜索、详情与正文图片已本地验证。'),
+    ('manben', '漫本', 'https://www.manben.com/mh-updated/', '阅读页壳化后走 chapterfun.ashx packer 解包, 链路已本地验证。'),
+    ('mhkan', '漫画看', 'https://m.wmh1234.com/', '阅读页跳 reader.hqread.cc 取签名图, 链路已本地验证; 详情页 DOM 有条目差异。'),
+    ('remenmanhua', '热门漫画', 'http://m.remenmanhua.com/', '首页列表与章节 API 链路已本地验证; 站内搜索不稳。'),
+    ('manhuapi', '漫画皮', 'http://www.manhuapi.cc/manhua/', 'jhc-data 图片属性与菜单页目录已本地验证; 搜索空结果自动回退列表。'),
+    ('dm5', '动漫屋', 'https://m.dm5.com/', '阅读页内嵌 packer 解包链路已本地验证。'),
+    ('jisu', '极速漫画', 'https://www.1kkk.com/', 'DM5_VIEWSIGN 签名 chapterfun.ashx 整章链路已本地验证。'),
+    ('zymk', '知音漫客', 'https://m.zymk.cn/', '正版国漫排序列表与整章图片公式已本地验证; 关键词搜索接口失效。'),
+    ('rawkuma', 'Rawkuma', 'https://rawkuma.net/', 'WP REST 与章节图片链路已本地验证。'),
+    ('jcomic', 'JComic', 'https://jcomic.net/', 'data-locked 反转 base64 图片解码已本地验证; S3 预签名需即时下载。'),
+    ('goda', 'GoDa漫画', 'https://v2.apikk.top/api/v2/manga/get?mid=1&mode=all', 'API 域章节与混淆图片解码已本地验证; 主站搜索被 CF 拦, 应用内依赖 WebView 过盾。'),
+    ('ykmh', '优酷漫画', 'https://www.ykmh.net/', 'chapterImages 直链图已本地验证; 短时高频会触发 IP 403。'),
 ):
     PROBES[key] = {
         'name': name,

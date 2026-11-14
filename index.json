@@ -271,5 +271,93 @@
     "version": "1.1.1",
     "description": "中文漫画：搜索、探索、详情与正文图片",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/shenqimanhua.js"
+  },
+  {
+    "name": "漫本",
+    "fileName": "manben.js",
+    "key": "manben",
+    "version": "1.0.0",
+    "description": "dm5 族：阅读页壳化改版适配，chapterfun.ashx packer 两段解包",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manben.js"
+  },
+  {
+    "name": "漫画看",
+    "fileName": "mhkan.js",
+    "key": "mhkan",
+    "version": "1.0.0",
+    "description": "阅读页跳转 reader.hqread.cc 跟随与签名 WebP 图域；详情页 DOM 条目差异兜底",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/mhkan.js"
+  },
+  {
+    "name": "热门漫画",
+    "fileName": "remenmanhua.js",
+    "key": "remenmanhua",
+    "version": "1.0.0",
+    "description": "首页列表 + 章节隐藏域 API；图域 static.998876.xyz；站内搜索不稳",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/remenmanhua.js"
+  },
+  {
+    "name": "漫画皮",
+    "fileName": "manhuapi.js",
+    "key": "manhuapi",
+    "version": "1.0.0",
+    "description": "jhc-data 图片属性 + 菜单页完整目录；搜索空结果自动回退列表",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manhuapi.js"
+  },
+  {
+    "name": "动漫屋",
+    "fileName": "dm5.js",
+    "key": "dm5",
+    "version": "1.0.0",
+    "description": "dm5 主站：阅读页内嵌 packer 解包 newImgs",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/dm5.js"
+  },
+  {
+    "name": "极速漫画",
+    "fileName": "jisu.js",
+    "key": "jisu",
+    "version": "1.0.0",
+    "description": "1kkk：DM5_VIEWSIGN 签名 chapterfun.ashx 单次整章",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/jisu.js"
+  },
+  {
+    "name": "知音漫客",
+    "fileName": "zymk.js",
+    "key": "zymk",
+    "version": "1.0.0",
+    "description": "正版国漫：排序列表浏览，mhpic 整章图片公式；关键词搜索接口失效",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/zymk.js"
+  },
+  {
+    "name": "Rawkuma",
+    "fileName": "rawkuma.js",
+    "key": "rawkuma",
+    "version": "1.0.0",
+    "description": "日文 RAW：WP REST 列表 + admin-ajax 章节 + cdn 直链图",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/rawkuma.js"
+  },
+  {
+    "name": "JComic",
+    "fileName": "jcomic.js",
+    "key": "jcomic",
+    "version": "1.0.0",
+    "description": "单本画廊：data-locked 反转 base64 解码，S3 预签名即时下载",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/jcomic.js"
+  },
+  {
+    "name": "GoDa漫画",
+    "fileName": "goda.js",
+    "key": "goda",
+    "version": "1.2.1",
+    "description": "API 域开放：章节图片混淆解码（J7r/kD/W4s/nQ + 7 字符块反转）；主站搜索需 WebView 过 CF",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/goda.js"
+  },
+  {
+    "name": "优酷漫画",
+    "fileName": "ykmh.js",
+    "key": "ykmh",
+    "version": "1.0.0",
+    "description": "chapterImages 直链图；短时高频可能触发 IP 403，内置低频使用",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/ykmh.js"
   }
 ]
