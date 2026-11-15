@@ -2,7 +2,7 @@
 class ManWaBa extends ComicSource {
   name = "漫蛙漫画";
   key = "manwaba";
-  version = "2.0.4";
+  version = "2.0.5";
   minAppVersion = "1.4.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manwaba.js";
 
@@ -30,6 +30,14 @@ class ManWaBa extends ComicSource {
       view[i / 2] = parseInt(hex.substring(i, i + 2), 16);
     }
     return buf;
+  }
+
+  decodeJsStringEscapes(value) {
+    return value
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\\//g, "/")
+      .replace(/\\\\/g, "\\");
   }
 
   /// 解密章节图片参数
@@ -302,7 +310,7 @@ class ManWaBa extends ComicSource {
       if (!paramsMatch) {
         throw "Failed to extract params from chapter page";
       }
-      let params = paramsMatch[1];
+    let params = this.decodeJsStringEscapes(paramsMatch[1]);
 
       let decrypted = await this.decryptParams(params);
 
