@@ -187,6 +187,103 @@ class VsaFixture extends ComicSource {
 """
 
 
+PAGINATED_FIXTURE_TEMPLATE = """\
+class VsaPaginatedFixture extends ComicSource {
+  name = "VSA Paginated Fixture";
+  key = "vsa_paginated";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = {
+    loadNext: async (keyword, options, next) => {
+      let page = next == null ? 0 : Number(next);
+      return { comics: [new Comic({ id: page == 0 ? "ok" : "cm-1img", title: "page" + page, cover: "" })], next: page == 0 ? "1" : null };
+    },
+    optionList: [],
+  };
+  explore = [{
+    title: "next",
+    type: "multiPageComicList",
+    loadNext: async (next) => ({ comics: [new Comic({ id: "ok", title: "explore", cover: "" })], next: next == null ? "done" : null }),
+  }];
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
+MIXED_FIXTURE_TEMPLATE = """\
+class VsaMixedFixture extends ComicSource {
+  name = "VSA Mixed Fixture";
+  key = "vsa_mixed";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "search", cover: "" })], maxPage: 1 }), optionList: [] };
+  explore = [{
+    title: "mixed",
+    type: "mixed",
+    load: async (index) => ({ data: [[new Comic({ id: "ok", title: "mixed", cover: "" })], { title: "part", comics: [new Comic({ id: "cm-1img", title: "part", cover: "" })] }], maxPage: 1 }),
+  }];
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
+UNSUPPORTED_FIXTURE_TEMPLATE = """\
+class VsaUnsupportedFixture extends ComicSource {
+  name = "VSA Unsupported Fixture";
+  key = "vsa_unsupported";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "unsupported", cover: "" })], maxPage: 1 }), optionList: [] };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+  };
+}
+"""
+
+
+IMAGE_CONFIG_FAILURE_TEMPLATE = """\
+class VsaImageConfigFailure extends ComicSource {
+  name = "VSA Image Config Failure";
+  key = "vsa_image_config_failure";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "config", cover: "" })], maxPage: 1 }), optionList: [] };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+    onImageLoad: () => { throw new Error("fixture image config failure"); },
+  };
+}
+"""
+
+
+STATEFUL_FIXTURE_TEMPLATE = """\
+let vsaStatefulSearchSeen = false;
+class VsaStatefulFixture extends ComicSource {
+  name = "VSA Stateful Fixture";
+  key = "vsa_stateful";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => { vsaStatefulSearchSeen = true; return { comics: [new Comic({ id: "ok", title: "stateful", cover: "" })], maxPage: 1 }; }, optionList: [] };
+  comic = {
+    loadInfo: async (id) => { if (!vsaStatefulSearchSeen) throw new Error("stateful search marker missing"); return new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }); },
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
 BROKEN_SYNTAX_JS = """\
 class VsaBrokenSyntax extends ComicSource {
   name = "VSA Broken Syntax"
@@ -272,10 +369,20 @@ def generate_fixture_sources(out_dir, base_url: str) -> dict:
         "vsa_badsearch": out_dir / "vsa_badsearch.js",
         "vsa_throwinfo": out_dir / "vsa_throwinfo.js",
         "vsa_declared_broken": out_dir / "vsa_declared_broken.js",
+        "vsa_paginated": out_dir / "vsa_paginated.js",
+        "vsa_mixed": out_dir / "vsa_mixed.js",
+        "vsa_unsupported": out_dir / "vsa_unsupported.js",
+        "vsa_image_config_failure": out_dir / "vsa_image_config_failure.js",
+        "vsa_stateful": out_dir / "vsa_stateful.js",
     }
     files["vsa_fixture"].write_text(FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_broken"].write_text(BROKEN_SYNTAX_JS, encoding="utf-8")
     files["vsa_badsearch"].write_text(BAD_SEARCH_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_throwinfo"].write_text(THROW_INFO_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_declared_broken"].write_text(DECLARED_BROKEN_JS.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_paginated"].write_text(PAGINATED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_mixed"].write_text(MIXED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_unsupported"].write_text(UNSUPPORTED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_image_config_failure"].write_text(IMAGE_CONFIG_FAILURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_stateful"].write_text(STATEFUL_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     return files

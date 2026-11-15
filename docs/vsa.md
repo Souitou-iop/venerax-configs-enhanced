@@ -76,7 +76,24 @@ BLOCKED 必须基于可观察的外部限制证据, 不是疑难故障的垃圾�
 5. **挑战页证据**:入口/搜索阶段 JS 解析失败时, 对源站点首页做一次性挑战特征探测(Just a moment / cf-browser-verification 等), 命中 → `CHALLENGE_PAGE`;探测不到 → 如实 FAIL。注意:探测请求的头指纹与运行时不同, 无法复现挑战时按 FAIL 处理(如 MangaDex)。
 6. **无证据的失败** → FAIL 或 UNVERIFIED(网络超时/拒连未声明时), 不会变成 BLOCKED。
 
-稳定错误码(`error_code`, 便于聚合与历史比较):`SOURCE_LOAD_ERROR`、`SOURCE_METADATA_MISMATCH`、`SOURCE_SEARCH_PARSE_ERROR`、`SOURCE_INFO_ERROR`、`SOURCE_PAGES_EMPTY`、`IMAGE_HTTP_ERROR`、`IMAGE_HTML_INSTEAD_OF_IMAGE`、`IMAGE_DECODE_FAILED`、`IMAGE_COUNT_MISMATCH`、`RUNTIME_MISSING`、`RUNNER_MISSING`、`RUNNER_PROTOCOL_ERROR`、`NETWORK_TIMEOUT`、`NETWORK_STATUS_BLOCKED`、`AUTH_REQUIRED`、`CONFIG_COVERAGE_MISSING`。
+稳定错误码(`error_code`, 便于聚合与历史比较):`SOURCE_LOAD_ERROR`、`SOURCE_METADATA_MISMATCH`、`SOURCE_SEARCH_PARSE_ERROR`、`SOURCE_SEARCH_ERROR`、`SOURCE_INFO_ERROR`、`SOURCE_PAGES_EMPTY`、`SOURCE_PAGES_ERROR`、`IMAGE_CONFIG_ERROR`、`IMAGE_HTTP_ERROR`、`IMAGE_HTML_INSTEAD_OF_IMAGE`、`IMAGE_DECODE_FAILED`、`IMAGE_COUNT_MISMATCH`、`RUNTIME_MISSING`、`RUNNER_MISSING`、`RUNNER_UNSUPPORTED_CAPABILITY`、`RUNNER_PROTOCOL_ERROR`、`RUNNER_EXCEPTION`、`RUNNER_TIMEOUT`、`NETWORK_TIMEOUT`、`NETWORK_STATUS_BLOCKED`、`AUTH_REQUIRED`、`CONFIG_COVERAGE_MISSING`。
+
+## 搜索与探索接口能力矩阵
+
+Runner 按 `venera_core` 的实际类型执行接口。`loadPage` 与 `loadNext` 是同一列表类型的两种分页契约，不能把缺少 `loadPage` 当作源不支持列表。
+
+| 接口 | SDK 调用与返回语义 | Runner 支持 | 游标/分页约定 |
+| :-- | :-- | :-- | :-- |
+| `search.load` | `(keyword, options, page)`，返回 `{comics, maxPage}` | 支持 | 页码由调用方传入，默认 1 |
+| `search.loadNext` | `(keyword, next, options)`，返回 `{comics, next}` | 支持 | 首次 `next=null`，后续传回上次 `subData` |
+| `explore.load` | `(page)`，返回 `{comics, maxPage}` | 支持 | 页码从 1 开始 |
+| `explore.loadNext` | `(next)`，返回 `{comics, next}` | 支持 | 首次 `next=null`，`next=null` 表示终止 |
+| `explore.load` + `type=multiPartPage` | 返回分段数组，每段含 `title`、`comics` | 支持 | 逐段保留，不取第一段代替整体 |
+| `explore.load` + `type=mixed` | `(index)`，返回 `data`，元素是漫画列表或分段对象 | 支持 | Runner 传 0 基索引并保留两种元素形态 |
+
+页码型结果的 `subData` 和游标型结果的 `next` 都原样写入 JSON。Runner 不自动无限翻页，续页由调用方在有界循环中传入游标，并负责检测终止值和重复游标。
+
+错误 JSON 至少包含 `ok`、`stage`、`error_code`、`error_origin` 和脱敏 `evidence`。`error_origin=runner` 始终对应 `ERROR`，其中合法 SDK 能力未实现使用 `RUNNER_UNSUPPORTED_CAPABILITY`。`error_origin=source` 保留源级 `FAIL`，包括 `IMAGE_CONFIG_ERROR`。Python 聚合优先读取这些字段，不根据错误文本中的 `403` 或“需要登录”猜测框架责任。
 
 ## 全源覆盖(P0-3)
 

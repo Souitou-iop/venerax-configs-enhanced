@@ -42,8 +42,10 @@ from vsa.chain import (  # noqa: E402
     STATE_PASS,
     STATE_SKIP,
     STATE_UNVERIFIED,
+    CmdResult,
     RunnerContext,
     SourceResult,
+    runner_infra_error,
     run_source,
 )
 from vsa.config import SourceTestConfig, VsaConfig, js_field, load_config  # noqa: E402
@@ -251,6 +253,16 @@ def run_offline(rt: VeneraRuntime, runner_ctx: RunnerContext) -> tuple[list[Sour
             ("vsa_declared_broken", cfg_for("vsa_declared_broken", keyword="vsa",
                                             expect="blocked", blocked_patterns=["403"]), STATE_FAIL,
              "受限声明 + JS 错误 → FAIL(不被 BLOCKED 掩盖)"),
+            ("vsa_paginated", cfg_for("vsa_paginated", keyword="vsa"), STATE_PASS,
+             "search.loadNext 与 explore.loadNext 首页可执行"),
+            ("vsa_mixed", cfg_for("vsa_mixed", entry="explore", explore_index=0), STATE_PASS,
+             "explore.loadMixed 正确展开漫画列表与分段"),
+            ("vsa_unsupported", cfg_for("vsa_unsupported", keyword="vsa"), STATE_FAIL,
+             "SDK 对缺失 loadEp 的源返回源级 TypeError → FAIL"),
+            ("vsa_image_config_failure", cfg_for("vsa_image_config_failure", keyword="vsa"), STATE_FAIL,
+             "onImageLoad 抛错即 IMAGE_CONFIG_ERROR, 不因图片公开可下载而 PASS"),
+            ("vsa_stateful", cfg_for("vsa_stateful", keyword="vsa"), STATE_FAIL,
+             "跨阶段内存状态 Fixture: 独立 Runner 进程导致 info 无法读取 search 状态"),
         ]
         for case in cases:
             key, scfg, expect_state, desc = case[:4]
@@ -291,6 +303,45 @@ def run_offline(rt: VeneraRuntime, runner_ctx: RunnerContext) -> tuple[list[Sour
         checks.append({"case": "严格模式 Runner 缺失须 ERROR(不得 PASS)", "expect": STATE_ERROR,
                        "actual": actual, "ok": ok})
         print(f"  {'✅' if ok else '❌'} [strict-runner-missing] 期望 {STATE_ERROR}, 实际 {actual}", flush=True)
+
+        # 结构化 Runner 能力错误负向用例。真实 SDK 当前会为缺失的源方法
+        # 提供包装函数，因此这里直接验证协议字段到 ERROR 的聚合契约。
+        unsupported = CmdResult(
+            ok=False, exit_code=1, stdout="", stderr="supported capability is unavailable",
+            elapsed_ms=0,
+            payload={
+                "ok": False,
+                "stage": "explore",
+                "error_code": "RUNNER_UNSUPPORTED_CAPABILITY",
+                "error_origin": "runner",
+                "evidence": {"capability": "explore.loadNext"},
+            },
+        )
+        unsupported_result = runner_infra_error(unsupported)
+        ok = unsupported_result is not None and unsupported_result[0] == STATE_ERROR \
+            and unsupported_result[1] == "RUNNER_UNSUPPORTED_CAPABILITY"
+        checks.append({"case": "结构化 RUNNER_UNSUPPORTED_CAPABILITY 必须归 ERROR",
+                       "expect": STATE_ERROR,
+                       "actual": unsupported_result[0] if unsupported_result else "UNKNOWN",
+                       "error_code": unsupported_result[1] if unsupported_result else "",
+                       "ok": ok})
+        print(f"  {'✅' if ok else '❌'} [runner-unsupported] 结构化能力缺口归 ERROR", flush=True)
+
+        # 分页续页契约: 同一 Runner 命令显式传入上一次 subData 游标,
+        # 验证 null 初始游标、next 返回值和终止 null 都能通过 JSON 协议传递。
+        paginated = RunnerContext(binary=runner_ctx.binary, data_dir=runner_ctx.data_dir,
+                                  strict=True, allow_local=True)
+        paginated.js_path = files["vsa_paginated"]
+        first = paginated.explore("vsa_paginated", 0, offline_cfg.timeout_stage)
+        token = (first.payload or {}).get("subData")
+        second = paginated.explore("vsa_paginated", 0, offline_cfg.timeout_stage,
+                                   next_token=str(token) if token is not None else None)
+        terminal = (second.payload or {}).get("subData") is None
+        ok = first.ok and token == "done" and second.ok and terminal
+        checks.append({"case": "loadNext 游标终止与重复调用防护契约",
+                       "expect": "PASS", "actual": "PASS" if ok else "FAIL", "ok": ok,
+                       "evidence": {"first_next": token, "terminal_next": (second.payload or {}).get("subData")}})
+        print(f"  {'✅' if ok else '❌'} [loadNext-pagination] 首页/终止游标契约", flush=True)
 
         # Runner 协议异常(二进制输出非 JSON)→ ERROR, 不得被静态回退掩盖
         fake_runner = DEFAULT_FIXTURES / "fake_runner.sh"

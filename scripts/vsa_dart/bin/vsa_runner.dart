@@ -36,17 +36,28 @@ String identifyImage(Uint8List head) {
   }
 
   if (startsWith([0xff, 0xd8, 0xff])) return 'JPEG';
-  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'PNG';
-  if (startsWith('RIFF'.codeUnits) && head.length >= 12 && head[8] == 0x57 && head[9] == 0x45 && head[10] == 0x42 && head[11] == 0x50) {
+  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    return 'PNG';
+  if (startsWith('RIFF'.codeUnits) &&
+      head.length >= 12 &&
+      head[8] == 0x57 &&
+      head[9] == 0x45 &&
+      head[10] == 0x42 &&
+      head[11] == 0x50) {
     return 'WebP';
   }
   if (startsWith('GIF8'.codeUnits)) return 'GIF';
   // ISOBMFF ftyp box: [size(4)][ftyp(4)] — AVIF/HEIF 容器
-  if (head.length >= 8 && head[4] == 0x66 && head[5] == 0x74 && head[6] == 0x79 && head[7] == 0x70) {
+  if (head.length >= 8 &&
+      head[4] == 0x66 &&
+      head[5] == 0x74 &&
+      head[6] == 0x79 &&
+      head[7] == 0x70) {
     return 'AVIF';
   }
   final ascii = String.fromCharCodes(head.take(64)).toLowerCase();
-  if (ascii.contains('<html') || ascii.contains('<!doctype')) return 'HTML(非图片)';
+  if (ascii.contains('<html') || ascii.contains('<!doctype'))
+    return 'HTML(非图片)';
   return '未知(${head.take(8).map((e) => e.toRadixString(16).padLeft(2, '0')).join()})';
 }
 
@@ -71,11 +82,14 @@ bool isForbiddenIp(InternetAddress addr) {
     // IPv4-mapped ::ffff:0:0/96 → 按内嵌 IPv4 重新判定
     if (bytes[10] == 0xff && bytes[11] == 0xff) {
       final v4 = InternetAddress.fromRawAddress(
-          Uint8List.fromList(bytes.sublist(12)), type: InternetAddressType.IPv4);
+        Uint8List.fromList(bytes.sublist(12)),
+        type: InternetAddressType.IPv4,
+      );
       return isForbiddenIp(v4);
     }
     if (bytes[0] == 0xfc || bytes[0] == 0xfd) return true; // ULA
-    if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80) return true; // link-local
+    if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
+      return true; // link-local
     if (bytes.every((e) => e == 0)) return true; // :: 未指定地址
     return false;
   }
@@ -120,7 +134,10 @@ Future<String?> guardHost(String host, {bool allowLocal = false}) async {
     }
     return null;
   }
-  final addresses = await InternetAddress.lookup(host, type: InternetAddressType.any);
+  final addresses = await InternetAddress.lookup(
+    host,
+    type: InternetAddressType.any,
+  );
   if (addresses.isEmpty) {
     return 'DNS 解析无结果: $host';
   }
@@ -146,7 +163,10 @@ String originOf(Uri uri) {
 const sensitiveHeaders = {'authorization', 'cookie', 'proxy-authorization'};
 
 Map<String, String> headersForHop(
-    Map<String, String> headers, Uri from, Uri to) {
+  Map<String, String> headers,
+  Uri from,
+  Uri to,
+) {
   final sameOrigin = originOf(from) == originOf(to);
   if (sameOrigin) return headers;
   // 跨 Origin: 只保留非敏感头; Referer 跨域一并剥离, 防泄露路径/签名
@@ -162,20 +182,31 @@ Map<String, String> headersForHop(
 
 /// 带 URL/DNS 护栏的 GET: 手动逐跳跟随重定向, 每一跳重走护栏。
 Future<Response<List<int>>> guardedGet(
-    Dio dio, String url, Map<String, String> headers,
-    {bool allowLocal = false, int maxHops = 5}) async {
+  Dio dio,
+  String url,
+  Map<String, String> headers, {
+  bool allowLocal = false,
+  int maxHops = 5,
+}) async {
   var current = url;
   var hopHeaders = headers;
   for (var hop = 0; hop <= maxHops; hop++) {
     final urlErr = guardUrl(current);
     if (urlErr != null) {
       throw DioException.connectionError(
-          requestOptions: RequestOptions(path: current), reason: 'URL_GUARD: $urlErr');
+        requestOptions: RequestOptions(path: current),
+        reason: 'URL_GUARD: $urlErr',
+      );
     }
-    final hostErr = await guardHost(Uri.parse(current).host, allowLocal: allowLocal);
+    final hostErr = await guardHost(
+      Uri.parse(current).host,
+      allowLocal: allowLocal,
+    );
     if (hostErr != null) {
       throw DioException.connectionError(
-          requestOptions: RequestOptions(path: current), reason: 'DNS_GUARD: $hostErr');
+        requestOptions: RequestOptions(path: current),
+        reason: 'DNS_GUARD: $hostErr',
+      );
     }
     final response = await dio.get<List<int>>(
       current,
@@ -196,8 +227,9 @@ Future<Response<List<int>>> guardedGet(
       // HTTPS→HTTP 降级: 拒绝
       if (from.scheme == 'https' && to.scheme == 'http') {
         throw DioException.connectionError(
-            requestOptions: RequestOptions(path: current),
-            reason: 'URL_GUARD: 拒绝 HTTPS→HTTP 降级重定向');
+          requestOptions: RequestOptions(path: current),
+          reason: 'URL_GUARD: 拒绝 HTTPS→HTTP 降级重定向',
+        );
       }
       // 跨 Origin: 剥离敏感头(每一跳重新计算)
       hopHeaders = headersForHop(hopHeaders, from, to);
@@ -207,7 +239,9 @@ Future<Response<List<int>>> guardedGet(
     return response;
   }
   throw DioException.connectionError(
-      requestOptions: RequestOptions(path: url), reason: 'URL_GUARD: 重定向次数超过 $maxHops');
+    requestOptions: RequestOptions(path: url),
+    reason: 'URL_GUARD: 重定向次数超过 $maxHops',
+  );
 }
 
 Future<void> main(List<String> arguments) async {
@@ -222,6 +256,7 @@ Future<void> main(List<String> arguments) async {
   var index = 0;
   var count = 2;
   var allowLocal = false;
+  String? next;
   for (var i = 0; i < arguments.length; i++) {
     switch (arguments[i]) {
       case '--cmd':
@@ -244,14 +279,18 @@ Future<void> main(List<String> arguments) async {
         index = int.tryParse(arguments[++i]) ?? 0;
       case '--count':
         count = int.tryParse(arguments[++i]) ?? 2;
+      case '--next':
+        next = arguments[++i];
       case '--allow-local':
         allowLocal = true;
     }
   }
   if (dataPath == null || loadFile == null || key == null || cmd == null) {
-    stderr.writeln('usage: vsa_runner --cmd load|search|explore|info|pages|verify '
-        '--data <dir> --load <js> --key <key> [--keyword x] [--page n] [--index n] '
-        '[--comic-id id] [--ep-id id] [--count n] [--allow-local]');
+    stderr.writeln(
+      'usage: vsa_runner --cmd load|search|explore|info|pages|verify '
+      '--data <dir> --load <js> --key <key> [--keyword x] [--page n] [--index n] '
+      '[--comic-id id] [--ep-id id] [--count n] [--next token] [--allow-local]',
+    );
     exit(64);
   }
   if (count < 1) count = 1;
@@ -265,29 +304,45 @@ Future<void> main(List<String> arguments) async {
     // 自建 Dio 注入 venera_core: JS 网络桥与本 runner 共享同一实例/cookie jar。
     // 拦截器覆盖 **JS 网络桥的全部初始请求**(URL + DNS 护栏)。
     final dio = Dio();
-    dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final err = guardUrl(options.uri.toString());
-        if (err != null) {
-          handler.reject(DioException.connectionError(
-              requestOptions: options, reason: 'URL_GUARD: $err'));
-          return;
-        }
-        final hostErr = await guardHost(options.uri.host, allowLocal: allowLocal);
-        if (hostErr != null) {
-          handler.reject(DioException.connectionError(
-              requestOptions: options, reason: 'DNS_GUARD: $hostErr'));
-          return;
-        }
-        handler.next(options);
-      },
-    ));
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final err = guardUrl(options.uri.toString());
+          if (err != null) {
+            handler.reject(
+              DioException.connectionError(
+                requestOptions: options,
+                reason: 'URL_GUARD: $err',
+              ),
+            );
+            return;
+          }
+          final hostErr = await guardHost(
+            options.uri.host,
+            allowLocal: allowLocal,
+          );
+          if (hostErr != null) {
+            handler.reject(
+              DioException.connectionError(
+                requestOptions: options,
+                reason: 'DNS_GUARD: $hostErr',
+              ),
+            );
+            return;
+          }
+          handler.next(options);
+        },
+      ),
+    );
     await ComicSourceManager().init(
       dataPath: dataPath,
       appVersion: '2.0.0',
       dio: dio,
     );
-    final source = await ComicSourceManager().installFromFile(loadFile, replace: true);
+    final source = await ComicSourceManager().installFromFile(
+      loadFile,
+      replace: true,
+    );
     if (source.key != key) {
       out['loaded_key'] = source.key;
     }
@@ -300,19 +355,34 @@ Future<void> main(List<String> arguments) async {
         switch (cmd) {
           case 'load':
             out['ok'] = true;
-            out['meta'] = {'key': target.key, 'name': target.name, 'version': target.version};
+            out['meta'] = {
+              'key': target.key,
+              'name': target.name,
+              'version': target.version,
+            };
             break;
           case 'search':
             final search = target.searchPageData;
-            if (search == null || search.loadPage == null) {
-              throw 'source $key does not support search';
+            if (search == null) {
+              throw RunnerUnsupportedCapability('search');
             }
             final options = search.searchOptions
                     ?.map((option) => option.defaultValue)
                     .toList() ??
                 const [];
-            final res = await search.loadPage!(keyword ?? '', page, options);
-            if (res.error) throw res.errorMessage ?? 'search error';
+            final Res<List<Comic>> res;
+            if (search.loadPage != null) {
+              res = await search.loadPage!(keyword ?? '', page, options);
+            } else if (search.loadNext != null) {
+              res = await search.loadNext!(keyword ?? '', next, options);
+            } else {
+              throw RunnerUnsupportedCapability('search.loadPage/loadNext');
+            }
+            if (res.error)
+              throw SourceStageFailure(
+                'search',
+                res.errorMessage ?? 'search error',
+              );
             out['ok'] = true;
             out['data'] = (res.dataOrNull ?? const <Comic>[])
                 .map((e) => e.toJson())
@@ -320,13 +390,30 @@ Future<void> main(List<String> arguments) async {
             out['subData'] = res.subData;
             break;
           case 'explore':
-            if (target.explorePages.isEmpty || index >= target.explorePages.length) {
+            if (target.explorePages.isEmpty ||
+                index >= target.explorePages.length) {
               throw 'explore index out of range';
             }
             final explore = target.explorePages[index];
             if (explore.loadPage != null) {
               final res = await explore.loadPage!(page);
-              if (res.error) throw res.errorMessage ?? 'explore error';
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Comic>[])
+                  .map((e) => e.toJson())
+                  .toList();
+              out['subData'] = res.subData;
+            } else if (explore.loadNext != null) {
+              final res = await explore.loadNext!(next);
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
               out['ok'] = true;
               out['data'] = (res.dataOrNull ?? const <Comic>[])
                   .map((e) => e.toJson())
@@ -334,28 +421,73 @@ Future<void> main(List<String> arguments) async {
               out['subData'] = res.subData;
             } else if (explore.loadMultiPart != null) {
               final res = await explore.loadMultiPart!();
-              if (res.error) throw res.errorMessage ?? 'explore error';
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
               out['ok'] = true;
               out['data'] = (res.dataOrNull ?? const <ExplorePagePart>[])
-                  .map((part) => {
-                        'title': part.title,
-                        'comics': part.comics.map((e) => e.toJson()).toList(),
-                      })
+                  .map(
+                    (part) => {
+                      'title': part.title,
+                      'comics': part.comics.map((e) => e.toJson()).toList(),
+                    },
+                  )
                   .toList();
               out['subData'] = res.subData;
+            } else if (explore.loadMixed != null) {
+              final res = await explore.loadMixed!(page - 1);
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Object>[]).map((item) {
+                if (item is List<Comic>) {
+                  return {'comics': item.map((e) => e.toJson()).toList()};
+                }
+                if (item is ExplorePagePart) {
+                  return {
+                    'title': item.title,
+                    'comics': item.comics.map((e) => e.toJson()).toList(),
+                  };
+                }
+                throw RunnerProtocolFailure(
+                  'explore.loadMixed returned an unknown item',
+                );
+              }).toList();
+              out['subData'] = res.subData;
             } else {
-              throw 'explore page $index is not supported by runner';
+              throw RunnerUnsupportedCapability(
+                'explore.loadPage/loadNext/loadMultiPart/loadMixed',
+              );
             }
             break;
           case 'info':
+            if (target.loadComicInfo == null) {
+              throw RunnerUnsupportedCapability('comic.loadInfo');
+            }
             final res = await target.loadComicInfo!(comicId ?? '');
-            if (res.error) throw res.errorMessage ?? 'info error';
+            if (res.error)
+              throw SourceStageFailure(
+                'info',
+                res.errorMessage ?? 'info error',
+              );
             out['ok'] = true;
             out['data'] = res.dataOrNull!.toJson();
             break;
           case 'pages':
+            if (target.loadComicPages == null) {
+              throw RunnerUnsupportedCapability('comic.loadEp');
+            }
             final res = await target.loadComicPages!(comicId ?? '', epId ?? '');
-            if (res.error) throw res.errorMessage ?? 'pages error';
+            if (res.error)
+              throw SourceStageFailure(
+                'pages',
+                res.errorMessage ?? 'pages error',
+              );
             out['ok'] = true;
             out['data'] = res.dataOrNull ?? const <String>[];
             break;
@@ -365,23 +497,42 @@ Future<void> main(List<String> arguments) async {
         stdout.writeln(jsonEncode(out));
         exit(0);
       } catch (e) {
-        // 源级错误(JS 抛出的消息) → 上层按消息归因 FAIL/BLOCKED
         out['ok'] = false;
-        out['error'] = '$e';
+        if (e is RunnerFailure) {
+          out['error'] = e.message;
+          out['error_code'] = e.code;
+          out['error_origin'] = 'runner';
+          out['stage'] = e.stage;
+          out['evidence'] = e.evidence;
+        } else if (e is SourceStageFailure) {
+          out['error'] = e.message;
+          out['error_code'] = e.code;
+          out['error_origin'] = 'source';
+          out['stage'] = e.stage;
+        } else {
+          out['error'] = '$e';
+          out['error_code'] = 'RUNNER_EXCEPTION';
+          out['error_origin'] = 'runner';
+        }
         stdout.writeln(jsonEncode(out));
         exit(1);
       }
     }
 
+    if (target.loadComicPages == null) {
+      throw RunnerUnsupportedCapability('comic.loadEp');
+    }
     final pages = await target.loadComicPages!(comicId ?? '', epId ?? '');
     if (pages.error) {
       out['ok'] = false;
       out['error'] = 'loadEp: ${pages.errorMessage ?? 'unknown error'}';
       out['error_code'] = 'SOURCE_PAGES_ERROR';
+      out['error_origin'] = 'source';
+      out['stage'] = 'pages';
       stdout.writeln(jsonEncode(out));
       exit(1);
     }
-    final images = (pages.data ?? const <String>[])
+    final images = (pages.data)
         .whereType<String>()
         .where((u) => u.startsWith('http'))
         .toList();
@@ -391,6 +542,8 @@ Future<void> main(List<String> arguments) async {
       out['ok'] = false;
       out['error'] = 'No images';
       out['error_code'] = 'SOURCE_PAGES_EMPTY';
+      out['error_origin'] = 'source';
+      out['stage'] = 'pages';
       stdout.writeln(jsonEncode(out));
       exit(1);
     }
@@ -407,48 +560,83 @@ Future<void> main(List<String> arguments) async {
       final sample = <String, dynamic>{'index': i};
       Map<String, dynamic> headerConfig = {};
       try {
-        final cfg = await target.getImageLoadingConfig?.call(imageUrl, comicId ?? '', epId ?? '');
+        final cfg = await target.getImageLoadingConfig?.call(
+          imageUrl,
+          comicId ?? '',
+          epId ?? '',
+        );
         if (cfg != null) {
           headerConfig = cfg;
         }
       } catch (e) {
-        sample['image_config_error'] = '$e';
+        out['ok'] = false;
+        out['error'] = 'getImageLoadingConfig failed';
+        out['error_code'] = 'IMAGE_CONFIG_ERROR';
+        out['error_origin'] = 'source';
+        out['stage'] = 'image';
+        out['evidence'] = {'kind': 'callback_exception'};
+        stdout.writeln(jsonEncode(out));
+        exit(1);
       }
       final headers = <String, String>{};
       final rawHeaders = headerConfig['headers'];
+      if (rawHeaders != null && rawHeaders is! Map) {
+        out['ok'] = false;
+        out['error'] = 'getImageLoadingConfig returned invalid headers';
+        out['error_code'] = 'IMAGE_CONFIG_ERROR';
+        out['error_origin'] = 'source';
+        out['stage'] = 'image';
+        out['evidence'] = {'kind': 'invalid_headers'};
+        stdout.writeln(jsonEncode(out));
+        exit(1);
+      }
       if (rawHeaders is Map) {
         rawHeaders.forEach((k, v) => headers[k.toString()] = v.toString());
       }
       String fetchUrl = imageUrl;
-      if (headerConfig['url'] is String && (headerConfig['url'] as String).isNotEmpty) {
+      if (headerConfig['url'] is String &&
+          (headerConfig['url'] as String).isNotEmpty) {
         fetchUrl = headerConfig['url'] as String;
       }
-      if (!headers.containsKey('User-Agent') || headers['User-Agent']!.isEmpty) {
-        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      if (!headers.containsKey('User-Agent') ||
+          headers['User-Agent']!.isEmpty) {
+        headers['User-Agent'] =
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
             '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
       }
       try {
-        final response = await guardedGet(dio, fetchUrl, headers, allowLocal: allowLocal);
+        final response = await guardedGet(
+          dio,
+          fetchUrl,
+          headers,
+          allowLocal: allowLocal,
+        );
         final bytes = response.data!;
         final magic = identifyImage(Uint8List.fromList(bytes));
         sample['url'] = fetchUrl.split('?').first;
         sample['status'] = response.statusCode;
         sample['magic'] = magic;
         sample['size'] = bytes.length;
-        sample['sha256'] =
-            bytes.isEmpty ? '' : sha256.convert(bytes.take(1 << 20).toList()).toString();
+        sample['sha256'] = bytes.isEmpty
+            ? ''
+            : sha256.convert(bytes.take(1 << 20).toList()).toString();
         final okStatus = response.statusCode == 200 && bytes.isNotEmpty;
         final trustedImage = magic != 'HTML(非图片)' && !magic.startsWith('未知');
         if (!okStatus || !trustedImage) {
           sample['verified'] = false;
           sample['error'] = !okStatus
               ? 'IMAGE_HTTP_ERROR'
-              : (magic == 'HTML(非图片)' ? 'IMAGE_HTML_INSTEAD_OF_IMAGE' : 'IMAGE_UNRECOGNIZED');
+              : (magic == 'HTML(非图片)'
+                  ? 'IMAGE_HTML_INSTEAD_OF_IMAGE'
+                  : 'IMAGE_UNRECOGNIZED');
           sampleResults.add(sample);
           break;
         }
         // WebP 不区分 VP8/VP8L/VP8X 变体, 统一尝试解码(package:image 支持)
-        final decodable = magic == 'JPEG' || magic == 'PNG' || magic == 'GIF' || magic == 'WebP';
+        final decodable = magic == 'JPEG' ||
+            magic == 'PNG' ||
+            magic == 'GIF' ||
+            magic == 'WebP';
         if (decodable) {
           try {
             final decodedImg = imglib.decodeImage(Uint8List.fromList(bytes));
@@ -481,9 +669,10 @@ Future<void> main(List<String> arguments) async {
         final reason = '$e';
         sample['verified'] = false;
         sample['status'] = 'ERR';
-        sample['error'] = reason.startsWith('URL_GUARD') || reason.startsWith('DNS_GUARD')
-            ? 'URL_GUARD_REJECTED'
-            : 'IMAGE_FETCH_ERROR';
+        sample['error'] =
+            reason.startsWith('URL_GUARD') || reason.startsWith('DNS_GUARD')
+                ? 'URL_GUARD_REJECTED'
+                : 'IMAGE_FETCH_ERROR';
         sample['error_detail'] = reason;
         sampleResults.add(sample);
         break;
@@ -508,4 +697,37 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln(jsonEncode(out));
     exit(1);
   }
+}
+
+abstract class RunnerFailure implements Exception {
+  String get code;
+  String get message;
+  String get stage;
+  Map<String, dynamic> get evidence;
+}
+
+class RunnerUnsupportedCapability implements RunnerFailure {
+  final String capability;
+  RunnerUnsupportedCapability(this.capability);
+  String get code => 'RUNNER_UNSUPPORTED_CAPABILITY';
+  String get message =>
+      'Runner does not implement supported capability: $capability';
+  String get stage => 'runner';
+  Map<String, dynamic> get evidence => {'capability': capability};
+}
+
+class RunnerProtocolFailure implements RunnerFailure {
+  final String detail;
+  RunnerProtocolFailure(this.detail);
+  String get code => 'RUNNER_PROTOCOL_ERROR';
+  String get message => detail;
+  String get stage => 'runner';
+  Map<String, dynamic> get evidence => {};
+}
+
+class SourceStageFailure implements Exception {
+  final String stage;
+  final String message;
+  SourceStageFailure(this.stage, this.message);
+  String get code => 'SOURCE_${stage.toUpperCase()}_ERROR';
 }

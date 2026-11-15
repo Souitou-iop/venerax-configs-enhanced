@@ -103,10 +103,19 @@ def runner_infra_error(r) -> tuple | None:
     """Runner 自身故障(协议/缺失/异常) → ERROR; 与源级失败严格区分。"""
     stderr = str(getattr(r, "stderr", "") or "")
     code = getattr(r, "exit_code", None)
+    payload = getattr(r, "payload", None) or {}
+    payload_code = payload.get("error_code")
+    if payload.get("error_origin") == "runner" and payload_code:
+        return (STATE_ERROR, str(payload_code), {
+            "evidence_type": "runner",
+            **(payload.get("evidence") or {}),
+        })
     if stderr.startswith("RUNNER_PROTOCOL_ERROR"):
         return (STATE_ERROR, "RUNNER_PROTOCOL_ERROR", {"evidence_type": "runner"})
     if code == 66 or stderr == "RUNNER_MISSING":
         return (STATE_ERROR, "RUNNER_MISSING", {"evidence_type": "runner"})
+    if code == 124 or stderr.startswith("RUNNER_TIMEOUT"):
+        return (STATE_ERROR, "RUNNER_TIMEOUT", {"evidence_type": "runner"})
     return None
 
 
@@ -373,7 +382,8 @@ def verify_images_via_runner(runner: Path, js_path: Path, key: str, comic_id: st
             capture_output=True, text=True, timeout=timeout,
         )
     except sp.TimeoutExpired:
-        return {"ok": False, "error": f"runner timeout after {timeout}s", "error_code": "NETWORK_TIMEOUT"}
+        return {"ok": False, "error": f"runner timeout after {timeout}s",
+                "error_code": "RUNNER_TIMEOUT", "error_origin": "runner"}
     try:
         payload = json.loads(proc.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
@@ -396,6 +406,7 @@ class RunnerContext:
     def _run_cmd(self, cmd: str, key: str, js_path: Path,
                  keyword: str = "", page: int = 1, index: int = 0,
                  comic_id: str = "", ep_id: str = "",
+                 next_token: str | None = None,
                  timeout: int = 120) -> "CmdResult":
         """经 runner 子命令执行阶段(护栏 Dio 覆盖全部网络, 取代独立 venera_cli)。"""
         import subprocess as sp
@@ -412,6 +423,8 @@ class RunnerContext:
             args += ["--keyword", keyword, "--page", str(page)]
         if cmd == "explore":
             args += ["--index", str(index)]
+        if next_token is not None:
+            args += ["--next", next_token]
         if cmd in ("info", "pages", "verify"):
             args += ["--comic-id", str(comic_id)]
         if cmd in ("pages", "verify"):
@@ -421,7 +434,7 @@ class RunnerContext:
             proc = sp.run(args, capture_output=True, text=True, timeout=timeout)
         except sp.TimeoutExpired:
             return CmdResult(ok=False, exit_code=124, stdout="",
-                             stderr=f"timeout after {timeout}s", elapsed_ms=int(timeout * 1000))
+                             stderr=f"RUNNER_TIMEOUT after {timeout}s", elapsed_ms=int(timeout * 1000))
         try:
             payload = json.loads(proc.stdout.strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError):
@@ -436,11 +449,15 @@ class RunnerContext:
     def load_source(self, js_path: Path, timeout: int = 90) -> "CmdResult":
         return self._run_cmd("load", js_field(js_path, "key") or "", js_path, timeout=timeout)
 
-    def search(self, key: str, keyword: str, page: int = 1, timeout: int = 120) -> "CmdResult":
-        return self._run_cmd("search", key, Path("."), keyword=keyword, page=page, timeout=timeout)
+    def search(self, key: str, keyword: str, page: int = 1, timeout: int = 120,
+               next_token: str | None = None) -> "CmdResult":
+        return self._run_cmd("search", key, Path("."), keyword=keyword, page=page,
+                             next_token=next_token, timeout=timeout)
 
-    def explore(self, key: str, index: int = 0, timeout: int = 120) -> "CmdResult":
-        return self._run_cmd("explore", key, Path("."), index=index, timeout=timeout)
+    def explore(self, key: str, index: int = 0, timeout: int = 120,
+                next_token: str | None = None) -> "CmdResult":
+        return self._run_cmd("explore", key, Path("."), index=index,
+                             next_token=next_token, timeout=timeout)
 
     def info(self, key: str, comic_id: str, timeout: int = 120) -> "CmdResult":
         return self._run_cmd("info", key, Path("."), comic_id=comic_id, timeout=timeout)
@@ -469,6 +486,16 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
     patterns = cfg.blocked_patterns
 
     def finish_failed(stage: str, r, extra: str = ""):
+        payload = getattr(r, "payload", None) or {}
+        if payload.get("error_origin") == "source" and payload.get("error_code"):
+            code = str(payload["error_code"])
+            evidence = {"evidence_type": "source", "error_origin": "source"}
+            res.add(stage, STATE_FAIL, (r.err_brief + extra)[:200], r.elapsed_ms,
+                    error_code=code, evidence=evidence)
+            res.state = STATE_FAIL
+            res.error_code = code
+            res.evidence.update(evidence)
+            return res
         challenge = {}
         if stage in ("search",) and _is_js_error(r.stderr or "") and base_url:
             challenge = probe_site_challenge(base_url + "/")
@@ -717,6 +744,14 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             sample_err = first_bad.get("error", "") or runner_payload.get("error", "")
             detail = (f"样本{first_bad.get('index', 0) + 1}: HTTP {status} "
                       f"{first_bad.get('magic', '')} {sample_err}").strip()
+            if runner_payload.get("error_origin") == "source" and runner_payload.get("error_code"):
+                code = str(runner_payload["error_code"])
+                res.add("image", STATE_FAIL, detail[:200], error_code=code,
+                        evidence={"evidence_type": "source", "error_origin": "source"})
+                res.state = STATE_FAIL
+                res.error_code = code
+                res.evidence.update({"error_origin": "source"})
+                return res
             # 结构化错误码优先(SOURCE_PAGES_EMPTY/IMAGE_DECODE_FAILED 等是数据/解码层事实 → FAIL);
             # 仅 HTTP 状态类失败走声明式分类(status 命中 → BLOCKED, 证据=http_status)
             runner_code = runner_payload.get("error_code") or ""
