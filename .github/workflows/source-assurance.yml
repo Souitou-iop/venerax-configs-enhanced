@@ -155,7 +155,7 @@ jobs:
           else
             mkdir -p /tmp/vsa-history-repo
             git -C /tmp/vsa-history-repo init
-            git -C /tmp/vsa-history-repo remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+            git -C /tmp/vsa-history-repo remote add origin "https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
             git -C /tmp/vsa-history-repo checkout --orphan vsa-history
           fi
           mkdir -p /tmp/vsa-history-repo/snapshots
