@@ -60,12 +60,13 @@ python scripts/source_assurance.py --diagnose \
 - `tests/test_vsa_diagnose.py` 覆盖基线、可比较性、状态变化、间歇问题、源移除、错误输入和快照幂等。
 - `docs/vsa-diagnose.md` 记录日常使用、事件语义、权限边界和数据安全规则。
 - `docs/vsa-diagnose-plan.md` 保留实施决策和范围边界。
+- PR #11 已创建，PR Source Validate 和 PR Version Check 已通过，地址为 https://github.com/Souitou-iop/venerax-configs-enhanced/pull/11。
 
 ## 已知限制
 
 - 当前只实现确定性规则，暂不接入 Layer 1 的自动交叉归因。
 - 第一次运行只有 `FIRST_OBSERVATION`，无法判断新增故障。
-- 历史分支的远端写入需要 GitHub Actions 在可信 schedule 或手动运行中执行。当前本地已验证归档接口，尚未对本轮修改运行远端 Actions。
+- 远端手动运行已验证完整链路。Run [43690014115](https://github.com/Souitou-iop/venerax-configs-enhanced/actions/runs/43690014115) 的 Live 失败后，Diagnose job 成功生成 46 条 `FIRST_OBSERVATION`，archive-history job 成功写入 `vsa-history`。远端快照为 `snapshots/43690014115.json`，历史提交为 `5e73764a77729db4705d5c5a0b9ba027f8655a6f`。
 - 现有 VSA 的跨阶段 JS 内存状态、DNS TOCTOU 和出站隔离边界保持原样。
 - 归因证据不足时会输出低置信度或 UNKNOWN，摘要不会把假设写成事实。
 
