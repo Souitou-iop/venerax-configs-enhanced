@@ -18,7 +18,7 @@
 - 根因证据：章节 HTML 的 `params` JavaScript 字符串把 Base64 中的 `+` 写成 `\u002b`，把 `/` 写成 `\/`。源代码直接把正则捕获值交给 Base64 解码，解密后的 JSON 不完整，`JSON.parse` 报 `Unexpected end of JSON input`。同一源的多个章节均可复现该错误。
 - 修改文件和版本：`manwaba.js`，`v2.0.4 → v2.0.5`，同步更新 `index.json` 和 README 版本说明。
 - 修复方案：新增 `decodeJsStringEscapes`，在 Base64 解码前还原 Unicode、十六进制、斜杠和反斜杠转义。
-- 离线回归：`node tests/test_manwaba_source.js` 通过，使用脱敏章节 HTML Fixture 验证 `\u002b` 与 `\/` 的还原。
+- 离线回归：`node tests/test_manwaba_source.cjs` 通过，使用脱敏章节 HTML Fixture 验证 `\u002b` 与 `\/` 的还原。
 - 修复后真实验收：`PASS`，报告为 `work/vsa/recovery/manwaba-after/vsa-live-20261115-163207.json`，图片 2/2 获取并解码通过。
 - VeneraX 客户端实测：未进行图形客户端实测。
 - 仍存在的限制：当前证据覆盖公开章节参数解析和 VSA 严格链路，尚未覆盖登录态或其他域名配置。
@@ -46,7 +46,7 @@
 ## 回归证据
 
 - `python -m unittest discover -s tests -v`：13/13 通过。
-- `node tests/test_manwaba_source.js`：通过。
+- `node tests/test_manwaba_source.cjs`：通过。
 - `python -m py_compile scripts/e2e_health_check.py scripts/source_assurance.py scripts/vsa/*.py`：通过。
 - `node scripts/validate-pr-versions.js origin/main`：版本规则通过。
 - `python scripts/source_assurance.py --check-coverage`：46/46 纳管，0 个豁免。
