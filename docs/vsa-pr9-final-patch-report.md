@@ -1,119 +1,120 @@
-# VSA PR #9 最终补丁:安全边界与验收整改报告
+# VSA PR #9 Runner 兼容性与错误分类最终审计报告
 
-> **依据**:《VSA_PR9_最终补丁_安全边界与验收交接文档》
-> **分支**:`vsa-reliability` · **起始 SHA**:`5ba79a3` · **最终 SHA**:`cf18358`
-> **PR**:[#9](https://github.com/Souitou-iop/venerax-configs-enhanced/pull/9)(OPEN,未合并)
-> **本文性质**:实际执行的整改记录;全部命令与结果均为真实运行输出,可按 §8 复现。
+## 1. 仓库真实基线
 
----
+- 工作分支：`vsa-reliability`
+- 本轮代码提交：`d4d8197`，父提交为 `8144672`
+- `origin/main`：`d3ea933`
+- PR #9：OPEN，目标为 `main`，远端地址为 https://github.com/Souitou-iop/venerax-configs-enhanced/pull/9
+- 本轮没有修改 `index.json`、正式漫画源 JS、订阅地址或工作流。
+- 工作区原有未跟踪目录和文件已保留，未纳入本轮提交。
 
-## 1. 基线
+历史 SHA 关系已经由 `git log` 核实。`5ba79a3`、`a5a1f5a`、`cf18358` 均位于 `8144672` 之前，`8144672` 是本轮前远端 HEAD，`d4d8197` 是本轮代码修复后的本地 HEAD。
 
-| 项 | 值 |
-|---|---|
-| 起始 SHA | `5ba79a3`(上轮《二次整改审计报告》所载最终 SHA) |
-| 最终 SHA | `cf18358`(本轮 3 个整改提交:`ba59875` P0-A/P0-B → `cf18358` rt.version 容错 → `ed916ad`/`be1461d` 等为上轮提交) |
-| CI 验证 | run [43635833760](https://github.com/Souitou-iop/venerax-configs-enhanced/actions/runs/43635833760)(最终 HEAD 专属,strict,runner-only) |
-| 运行环境 | 本机 macOS arm64 / Dart 3.14 / Python 3.15;CI ubuntu-latest / Dart 3.14 / Python 3.11 |
-| 覆盖率 | 46/46 正式源纳管,0 问题 |
+## 2. 复现清单
 
-上轮报告声称的 31 PASS / 9 BLOCKED / 6 FAIL(run 43613108825)已经由 artifact JSON(非日志)独立核验属实;本轮在此基础上继续整改。
+| 问题 | 修改前实际表现 | 本轮结果 |
+| :-- | :-- | :-- |
+| ehentai 探索 | `explore page 0 is not supported by runner` | 已消除。Runner 可执行 `loadNext`，真实复测继续到 pages 阶段，最终因该条目返回空图片列表而 `FAIL/SOURCE_PAGES_ERROR` |
+| 合法分页接口 | Runner 只分支 `loadPage` 与 `loadMultiPart` | `search.loadNext`、`explore.loadNext`、`explore.loadMixed` 已加入通用分支 |
+| Runner 能力缺口 | 错误文本没有责任来源，Python 可能按源错误归因 | 结构化 `error_origin=runner`、`RUNNER_UNSUPPORTED_CAPABILITY` 会归 `ERROR` |
+| 动态图片回调 | `getImageLoadingConfig` 抛错后继续下载 | 回调异常或无效 headers 在下载前返回 `IMAGE_CONFIG_ERROR` |
+| 跨阶段 JS 状态 | 每阶段启动独立 Runner，状态是否复用未验证 | `vsa_stateful` Fixture 实测为 search PASS、info FAIL，证明当前策略不复用 JS 内存状态 |
 
-## 2. 问题复现表
+## 3. Venera 接口能力矩阵
 
-| 线索 | 修改前是否成立 | 复现方式 | 修改位置 |
-|---|---|---|---|
-| P0-A 独立 `venera_cli` 子进程网络不受护栏约束 | **成立**:`chain.py` 的 load/search/explore/info/pages 全部经 `VeneraRuntime` 调 CLI 子进程,其网络走 `_Config.dio`(无法注入护栏) | 审计调用链:runner 拦截器只覆盖 runner 进程内的 Dio;CLI 进程是独立 Dart 进程 | **架构级修复**:runner 扩展 `--cmd load/search/explore/info/pages` 子命令,`chain.py` 全部阶段改经 runner 子命令执行;CLI 从验收路径移除 |
-| P0-A DNS 解析结果不校验 | 成立(a5a1f5a 仅有 URL 字符串护栏) | `guardUrl` 无 lookup 调用 | runner 基线(上轮)已含 `guardHost` DNS 逐 IP 校验 + 共享 Dio 拦截器覆盖 JS 桥初始请求(已确认存在于 a5a1f5a) |
-| P0-B 跨 Origin 重定向复用敏感头 | **成立**:`guardedGet` 重定向循环只更新 URL,`headers` 原样复用 | 构造 302→外域场景,Authorization/Cookie 会随跳转携带 | `headersForHop()`:跨 Origin 剥离 Authorization/Cookie/Proxy-Authorization/Referer(小写比较);拒绝 HTTPS→HTTP 降级 |
-| P1-A chain.py counts 缺 `decoded_image_count` 导致 level 恒 bytes | **成立**:`counts` 手工构造仅 4 键,`all_decoded = counts.get("decoded_image_count", 0) == verified` 恒 False | 本机 manben live PASS level=runtime_image_bytes,而 runner 实测 WebP 解码成功 | counts 透传 runner 全部 6 项计数;level 规则=全部已验证样本解码成功才得 `runtime_image_decoded` |
-| P1-A WebP 解码判定只认 lossy(VP8) | 成立(上轮已修,本轮确认) | CI 上全部 PASS 解码 0 | `decodable` 对 WebP 三变体统一尝试(本轮确认无回归) |
-| P1-B PR 工作流浮动 HEAD | 成立(pr-source-validate `--depth 1` 无 pin) | 两工作流 pin 来源不一致 | `scripts/vsa/RUNTIME_PIN` 单一来源,两工作流统一 `cat` 读取;本轮 live 工作流 runner-only 后 PR 工作流仍以 RUNTIME_PIN 构建用于 `source validate` 的 CLI |
-| P1-C "15 项 vs 16/16"口径 | 确认为口径问题:15=负向矩阵用例数,16=15+1 行汇总(手工 grep 误计) | 旧自检输出 `grep -c ✅` 计 16 | 用例数改由结果集合自动计算(report.self_test.total/passed/cases);现 18 项 |
+| 接口 | 实际 SDK 契约 | Runner 状态 | Fixture |
+| :-- | :-- | :-- | :-- |
+| `search.load` | `(keyword, options, page)`，返回 `{comics, maxPage}` | 支持 | 既有 `vsa_fixture` |
+| `search.loadNext` | `(keyword, next, options)`，返回 `{comics, next}`，首个游标为 `null` | 支持 | `vsa_paginated` |
+| `explore.load` | `(page)`，返回 `{comics, maxPage}` | 支持 | 既有源与 Fixture |
+| `explore.loadNext` | `(next)`，返回 `{comics, next}`，`next=null` 表示结束 | 支持 | `vsa_paginated` |
+| `explore.loadMultiPart` | 返回多个 `ExplorePagePart` | 支持 | 既有源与 Fixture |
+| `explore.loadMixed` | `(index)`，返回 `data`，元素可为漫画列表或 `ExplorePagePart` | 支持 | `vsa_mixed` |
 
-## 3. 代码变更
+页码型接口使用 1 起始页码。`loadMixed` 使用 SDK 的 0 基索引。游标由 Runner JSON 的 `subData` 传出，调用方负责终止和重复游标控制。本轮没有引入无限翻页。
 
-| 文件 | 变更 | 关键函数/接口 |
-|---|---|---|
-| `scripts/vsa_dart/bin/vsa_runner.dart` | 全链路执行器化:`--cmd load/search/explore/info/pages/verify` 子命令(输出与 venera CLI 同构 JSON);跨 Origin 头卫生;HTTPS→HTTP 降级拒绝;`SourceStageError` 错误分层(源级→SOURCE_ERROR 归 FAIL,框架→RUNNER_EXCEPTION 归 ERROR);DNS 解析逐 IP 校验(IPv4/IPv6/mapped/CGNAT/ULA/link-local) | `guardedGet()`、`headersForHop()`、`originOf()`、`guardHost()`、`isForbiddenIp()`、`SourceStageError` |
-| `scripts/vsa/chain.py` | 全阶段经 runner 子命令(`RunnerContext.search/explore/info/pages/load_source`);HTTP 状态结构化抽取(`HTTP_STATUS_RE`,不做任意子串匹配);runner 结构化错误码优先(`SOURCE_PAGES_EMPTY` 等数据层事实→FAIL,HTTP 状态→声明式分类);counts 六项透传 | `classify_failure()`、`runner_infra_error()`、`extract_http_status()` |
-| `scripts/source_assurance.py` | live 强制禁用 allow_local(YAML 声明无效则警告);meta 记录 `source_commit/config_hash/runtime_build_id`;覆盖率门槛前置 | `check_coverage()` |
-| `scripts/vsa/runtime.py` | `rt.version` 容错(CLI 缺失不再阻断);RUNTIME_PIN 文件读取;`build_id()` | `VeneraRuntime.version` |
-| `scripts/vsa/fixture.py` | 负向 fixture 扩充:空 pages、混合解码(JPEG+AVIF)、第二张失败、SSRF、截断、声明掩盖 | `_img_bytes()` |
-| `.github/workflows/source-assurance.yml` | runner-only(不再构建 CLI);覆盖率步骤前置;permissions contents:read | — |
-| `docs/vsa.md` | 全链路 runner 化、跨 Origin 头卫生、残余风险声明、level 语义同步 | — |
+## 4. 代码改动
 
-**取舍理由**:runner 子命令输出刻意与 venera CLI 同构,使 `chain.py` 的解析逻辑零改动即可切换执行器;保留 `VeneraRuntime` 类作为构建入口与旧字段兼容(不破坏 `--runtime` 参数)。
+- `scripts/vsa_dart/bin/vsa_runner.dart` 增加 search/explore 的 `loadNext`、`loadMixed` 适配，保留 `loadPage` 与 `loadMultiPart`，并输出结构化错误字段。
+- `scripts/vsa_dart/bin/vsa_runner.dart` 为 Runner 能力错误、协议错误和源阶段错误提供不同错误码与来源。图片配置回调失败会在实抓前结束。
+- `scripts/vsa/chain.py` 优先读取 Runner payload 的 `error_origin`、`error_code`，Runner 错误统一归 `ERROR`，源错误保持 `FAIL`。
+- `scripts/vsa/fixture.py` 增加分页、混合返回、动态图片配置失败和跨阶段状态 Fixture。
+- `scripts/source_assurance.py` 增加结构化 Runner 能力错误、游标终止和新增 Fixture 的自动计数。
+- `docs/vsa.md` 补充实际 SDK 能力矩阵、错误语义和稳定错误码。
 
-## 4. 执行链路表(整改后)
+SDK 当前会为缺失的 `loadEp` 生成包装函数，因此调用结果是源侧 `TypeError`。该情况实测为 `FAIL/SOURCE_PAGES_ERROR`，没有被误报成 Runner 能力缺口。
 
-| 验收阶段 | 执行进程 | 网络实现 | 安全措施 |
-|---|---|---|---|
-| load(安装+元数据) | runner 进程 | 无网络(本地文件) | 源语法错误→SOURCE_LOAD_ERROR→FAIL |
-| search/explore | runner 进程 | 源 JS 经 venera_core JS 桥 → 共享受护栏 Dio | 拦截器:URL 字符串+DNS 逐 IP 校验 |
-| info(详情+章节) | runner 进程 | 同上 | 同上 |
-| pages(图片 URL 列表) | runner 进程 | 同上 | 同上 |
-| image(字节+解码) | runner 进程 `guardedGet` | 同上 + `followRedirects=false` 手动逐跳 | 每跳重走 URL/DNS 护栏;跨 Origin 剥敏感头;HTTPS→HTTP 拒绝;跳数上限 5;TLS 校验开启 |
+## 5. 错误分类对照
 
-**已声明残余风险**(docs/vsa.md 同步):DNS TOCTOU 窗口;JS 桥经 Dio 内部跟随的 3xx 跳转目标未逐跳重校验(初始 URL 已护栏);无进程级网络沙箱。PR 路径仅运行离线验收(无 Live、无机密);Live 仅在维护者可控分支触发。
+| 实际来源 | 错误码示例 | 最终状态 |
+| :-- | :-- | :-- |
+| Runner 未实现合法协议能力 | `RUNNER_UNSUPPORTED_CAPABILITY` | `ERROR` |
+| Runner 输出畸形或 JSON 无法解析 | `RUNNER_PROTOCOL_ERROR` | `ERROR` |
+| Runner 内部异常或超时 | `RUNNER_EXCEPTION`、`RUNNER_TIMEOUT` | `ERROR` |
+| 源 JS 或解析阶段错误 | `SOURCE_SEARCH_ERROR`、`SOURCE_INFO_ERROR`、`SOURCE_PAGES_ERROR` | `FAIL` |
+| 动态图片配置回调抛错或类型错误 | `IMAGE_CONFIG_ERROR` | `FAIL` |
+| 有声明且观察到对应 HTTP 状态 | `NETWORK_STATUS_BLOCKED` | `BLOCKED` |
 
-## 5. 测试矩阵(18/18,自动计数)
+Runner 错误文本包含 `403` 或“需要登录”时仍按 `error_origin=runner` 归 `ERROR`，不会被 `blocked_patterns` 覆盖。
 
-`--self-test` 终局输出与 JSON `self_test.total=18/passed=18` 一致:
+## 6. 测试矩阵
 
-| # | 用例 | 期望 | 实际 |
-|---|---|---|---|
-| 1 | 正常源完整链路 | PASS(runtime_image_decoded) | ✓ |
-| 2 | HTML 充图 | FAIL | ✓ |
-| 3 | 损坏字节 | FAIL | ✓ |
-| 4 | 404 图片 | FAIL | ✓ |
-| 5 | 合法头截断(解码层) | FAIL | ✓ |
-| 6 | 第一张成功第二张失败 | FAIL | ✓ |
-| 7 | SSRF URL(元数据) | 拒绝 | ✓ |
-| 8 | 样本不足 | PASS+标注 | ✓ |
-| 9 | 空 pages+声明受限 | FAIL(不被掩盖) | ✓ |
-| 10 | 图片 404+声明 status:404 | BLOCKED(证据) | ✓ |
-| 11 | 混合解码(JPEG+AVIF) | PASS+level=bytes | ✓ |
-| 12-15 | JS 语法错/搜索抛错/详情抛错/受限声明+JS错 | FAIL | ✓ |
-| 16-18 | 严格缺 Runner/Runner 畸形输出/运行时缺失 | ERROR | ✓ |
+最终本地自动自检报告为 `/Volumes/SanDisk/Projects/venerax-configs-enhanced/work/vsa/reports/vsa-offline-20261115-131816.json`，自动统计 **25/25 通过**。覆盖内容包括：
 
-## 6. 报告一致性
+- 既有完整链路、HTML 伪图片、损坏字节、404、截断 JPEG、第二张失败、SSRF、样本不足、AVIF 未解码和声明式 BLOCKED。
+- JS 语法错误、搜索错误、详情错误、声明式限制与 JS 错误同时出现。
+- `search.loadNext`、`explore.loadNext` 首页和终止游标、`explore.loadMixed`。
+- `RUNNER_UNSUPPORTED_CAPABILITY`、Runner 缺失、Runner 畸形输出和运行时缺失。
+- `onImageLoad` 抛错不得 PASS。
+- 跨阶段状态不复用的可复现 Fixture。
 
-终局 live 报告(artifact 与本地)字段:`schema_version=2`、`runtime_build_id`(RUNTIME_PIN)、`runner_build_id=cf18358`(=最终 HEAD)、`source_commit=cf18358`、`config_hash`(vsa_sources.yml SHA)、每源 `verification_level` 与 stages 级 `error_code/evidence`。终端输出、JSON、Markdown、GH Summary 均由同一份 `build_report()` 数据生成,无第二事实来源。
+`python scripts/source_assurance.py --check-coverage` 的结果为正式源 46 个、已纳管 46 个、豁免 0 个、问题 0 个。Dart Runner 已通过真实 `dart build cli` 重编译。`python -m py_compile scripts/source_assurance.py scripts/vsa/*.py` 与 `git diff --check` 均通过。Dart analyze 仅保留仓库原有 `pubspec.yaml` 的 git dependency 发布警告，没有本次代码错误。
 
-## 7. CI(最终 HEAD)
+## 7. Live 结果
 
-| 项 | 值 |
-|---|---|
-| run | [43635833760](https://github.com/Souitou-iop/venerax-configs-enhanced/actions/runs/43635833760)(@ cf18358,strict) |
-| 结论 | failure —— 由 9 个**源级** FAIL 导致(exit 1 语义如实保留);工程步骤全部 success(runner 构建/覆盖率 46/46/严格验收执行) |
-| 统计 | 30 PASS / 7 BLOCKED / 9 FAIL / 0 ERROR |
-| artifact | vsa-reports(run 页面可下载,含 JSON+MD+coverage) |
+### ehentai
 
-## 8. 源级 Live 结果(9 个 FAIL 逐条)
+最终本地报告为 `/Volumes/SanDisk/Projects/venerax-configs-enhanced/work/vsa/reports/live-ehentai/vsa-live-20261115-132752.json`。
 
-| 源 | 错误 | 归因 |
-|---|---|---|
-| manga_dex | search JSON 解析拿到 HTML | 运行时浏览器 UA+机房 IP 触发 bot 挑战(文档化,待上游 UA 注入能力) |
-| shonen_jump_plus | 同上 | 同类挑战 |
-| manhuaren | search HTTP 503 | 站点限频(间歇,本机同日 PASS) |
-| ikmmh | 搜索 200+空结果 | 软封锁(证据不足,如实 FAIL) |
-| jm | 个别章节 `Invalid Data` | 间歇(同 commit 上轮 PASS) |
-| ehentai | `explore page 0 is not supported by runner` | **本轮新发现**:ehentai 的 explore 变体未被 runner 覆盖(待补 loadNext/mixed 分支) |
-| comic_walker | 章节空图片列表 | 站点对机房环境返回空内容 |
-| ccc | 章节空图片列表 | 未登录内容为空(已按新规则 FAIL,不再 BLOCKED) |
-| manwaba | 章节 AES 空响应 | 章节级差异 |
+- load：PASS
+- metadata：PASS
+- explore：PASS，25 条结果
+- info：PASS
+- pages：FAIL，`SOURCE_PAGES_ERROR`，实际条目返回空图片列表
 
-## 9. 安全边界及遗留风险
+本次真实结果中没有 `explore page 0 is not supported by runner`，所以原先的 Runner 能力缺口已被消除。该源仍不能因为本次网络返回空图片而宣称 PASS。
 
-- **已保护**:runner 全链路(100% 验收网络)的 URL/DNS/重定向逐跳护栏;跨 Origin 头剥离;TLS 全程校验;SSRF 负向回归。
-- **遗留**:DNS TOCTOU、Dio 内部重定向跳、无进程级沙箱——均已声明于 runner 文件头与 docs/vsa.md,不影响 PR 路径(PR 离线无 Live)。
-- **凭据**:PR 工作流 contents:read、不传 Secrets;源 JS 无法访问 GITHUB_TOKEN。
+### manben
+
+最终本地报告为 `/Volumes/SanDisk/Projects/venerax-configs-enhanced/work/vsa/reports/live-manben-final/vsa-live-20261115-132848.json`。
+
+- load、metadata、search、info、pages：PASS
+- image：PASS，2/2 张真实图片字节验证通过，2 张完整解码
+- 最终状态：PASS，`runtime_image_decoded`
+
+## 8. CI 记录
+
+PR #9 当前仍为 OPEN。GitHub 上最近一次远端检查属于本轮提交前的远端 SHA，`PR Source Validate` 与版本检查成功，`enable-auto-merge` 检查失败。`d4d8197` 尚未推送，因此没有最终 SHA 对应的 GitHub Actions 运行和 Artifact 证据。本地确定性门槛已经通过，远端最终检查需要在该提交进入 PR 后重新运行。
+
+## 9. 安全边界与残余技术债
+
+本轮继续复用现有 URL/DNS/TLS 护栏、手动重定向和跨 Origin 敏感头清理。新增列表接口只调用 `venera_core` 的既有网络桥，没有另建未保护的网络客户端。现有 DNS TOCTOU、JS 网络桥内部重定向逐跳复核不足和缺少进程级出站沙箱的边界仍保留，文档没有将 Runner 描述成任意社区 JS 的完全安全执行环境。
 
 ## 10. 合并建议
 
-**可合并**:三类遗留缺陷修复且有回归;runner-only 架构消除 P0-A 缺口;P0-B 有 fixture 级护栏;严格模式无假 PASS;9 个源级 FAIL 诚实呈现。Live 红 X 为真实源级问题的如实映射(框架健康由覆盖率/自检/0 ERROR 单独保证)。
+**本地代码层面可合并。** 25/25 离线自检、46/46 覆盖率、Runner 重编译、ehentai 能力缺口复现消除和 manben 回归均有真实执行证据。
 
-## 11. Diagnose 准备度
+**PR 当前不应直接宣称已完成最终合并门槛。** `d4d8197` 尚未推送，远端 CI 还没有针对最终 SHA 重跑。推送后应确认确定性 PR 检查、Runner 构建和最终报告 Artifact，再由维护者决定合并。未执行自动合并。
 
-RFC 与 schema v2 一致;合并后按 RFC 顺序启动:①脱敏历史持久化 ②状态变化检测 ③Summary 诊断摘要。前置任务:补 ehentai explore 变体。
+## 11. 下一阶段建议
+
+PR #9 经维护者审核并完成最终 CI 复核后，再启动 `docs/vsa-diagnose-rfc.md` 规划的 Diagnose MVP。第一批工作应是脱敏历史结果持久化、按运行时/源文件/配置哈希做变化检测，以及生成指出证据位置的诊断摘要。本轮不实现自动修复、自动提交 PR 或 Dashboard。
+
+## 结论摘要
+
+本次修改已经消除了“合法源接口不受支持被误判为 FAIL”的风险。可复现证据是 `vsa_paginated`、`vsa_mixed` 的 25/25 离线自检，以及真实 `ehentai` 已从原先的 unsupported 文本推进到实际 pages 结果。
+
+本次修改已经消除了“动态图片回调失败仍被判 PASS”的风险。可复现证据是 `vsa_image_config_failure` 在公开图片 URL 可用的情况下仍得到 `FAIL/IMAGE_CONFIG_ERROR`，且下载不会继续。
+
+本地代码可以进入 PR 审核，但 PR #9 目前还不能称为已完成最终合并验证，因为 `d4d8197` 尚未推送并缺少该 SHA 对应的远端 CI 结果。
