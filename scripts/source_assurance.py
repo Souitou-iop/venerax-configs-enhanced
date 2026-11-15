@@ -49,6 +49,9 @@ from vsa.chain import (  # noqa: E402
     run_source,
 )
 from vsa.config import SourceTestConfig, VsaConfig, js_field, load_config  # noqa: E402
+from vsa.diagnose import DiagnoseInputError, diagnose, load_report, normalize_report
+from vsa.diagnose_history import load_history, prune_history, select_baseline, snapshot_report, write_snapshot
+from vsa.diagnose_report import write_json as write_diagnose_json, write_markdown as write_diagnose_markdown
 from vsa.fixture import FixtureServer, generate_fixture_sources  # noqa: E402
 from vsa.report import build_report, write_json, write_markdown  # noqa: E402
 from vsa.runtime import (  # noqa: E402
@@ -386,6 +389,42 @@ def write_github_summary(md_path: Path):
             pass
 
 
+def run_diagnose(args) -> int:
+    """Run the offline Diagnose layer without rerunning any comic source."""
+    if not args.report:
+        print("--diagnose 必须同时提供 --report", file=sys.stderr)
+        return 1
+    try:
+        current_report = load_report(Path(args.report))
+        baseline = None
+        history_records = []
+        if args.against:
+            baseline = load_report(Path(args.against))
+        elif args.history_dir:
+            history_records = load_history(Path(args.history_dir))
+            baseline = select_baseline(current_report, history_records)
+        result = diagnose(current_report, normalize_report(baseline) if baseline else None,
+                          history=history_records)
+        output_dir = Path(args.output)
+        json_path = write_diagnose_json(result, output_dir / "diagnose.json")
+        md_path = write_diagnose_markdown(result, output_dir / "diagnose.md", args.report)
+        if args.history_dir:
+            snapshot = snapshot_report(current_report, args.run_id)
+            snapshot_path = write_snapshot(snapshot, Path(args.history_dir))
+            if args.prune_history_days:
+                prune_history(Path(args.history_dir), args.prune_history_days)
+            print(f"历史快照: {snapshot_path}")
+        write_github_summary(md_path)
+        print(f"诊断 JSON: {json_path}\n诊断 Markdown: {md_path}")
+        return 0
+    except DiagnoseInputError as exc:
+        print(f"诊断输入错误: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"诊断系统错误: {exc}", file=sys.stderr)
+        return 2
+
+
 def main():
     ap = argparse.ArgumentParser(description="Venera Source Assurance (VSA)")
     ap.add_argument("--source", help="单个源 key")
@@ -404,7 +443,16 @@ def main():
     ap.add_argument("--build", action="store_true", help="运行时缺失时自动构建(需 Dart)")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG), help="每源测试配置")
     ap.add_argument("--index", default=str(REPO_ROOT / "index.json"))
+    ap.add_argument("--diagnose", action="store_true", help="离线比较 VSA JSON 并生成诊断摘要")
+    ap.add_argument("--report", help="Diagnose 当前 VSA JSON 路径")
+    ap.add_argument("--against", help="Diagnose 基线 VSA JSON 路径")
+    ap.add_argument("--history-dir", help="Diagnose 历史快照目录")
+    ap.add_argument("--run-id", help="写入历史快照时使用的幂等 run_id")
+    ap.add_argument("--prune-history-days", type=int, help="写入快照后清理超过指定天数的历史")
     args = ap.parse_args()
+
+    if args.diagnose:
+        sys.exit(run_diagnose(args))
 
     out_dir = Path(args.output)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
