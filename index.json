@@ -212,7 +212,7 @@
     "name": "漫蛙漫画",
     "fileName": "manwaba.js",
     "key": "manwaba",
-    "version": "2.0.4",
+    "version": "2.0.5",
     "description": "漫画列表、搜索、详情与 AES 章节图片解密",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/manwaba.js"
   },
