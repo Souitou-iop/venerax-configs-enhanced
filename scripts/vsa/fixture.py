@@ -1,14 +1,18 @@
-"""VSA 离线 Fixture: 本地 HTTP 服务 + 动态生成 fixture 漫画源 + 负向测试套件。
+"""VSA 离线 Fixture: 本地 HTTP 服务 + 动态生成 fixture 漫画源 + 负向测试矩阵。
 
-fixture 服务模拟一个漫画站的全部链路面, 并提供确定的故障端点:
-  - 200 + HTML 充当图片(必须被判 FAIL)
-  - 200 + 损坏字节(必须被判 FAIL)
-  - 404 图片
-  - 慢响应(超时不得记 PASS)
+fixture 服务模拟一个漫画站的全部链路面, 并提供确定的故障端点(P1-2 矩阵):
+  - 200 + HTML 充当图片 → FAIL
+  - 200 + 损坏字节 → FAIL
+  - 200 + 合法 JPEG 头但截断 → FAIL(解码验证)
+  - 第一张正常 + 第二张失败 → FAIL(image_count 生效)
+  - 404 图片 → FAIL
+  - 内网/云元数据 URL → SSRF 护栏拒绝(安全回归)
+  - 可用样本少于请求数 → 如实标注(不偷换 1/2)
+  - 慢响应 → 超时不得记 PASS
+  - 声明受限 + JS 错误 → FAIL(不被 BLOCKED 掩盖)
 
-fixture 漫画源 JS 由本模块动态生成(端口写入, 用 .replace 占位符替换而非
-format, 模板中的花括号均为单层合法 JS), 经真实 venera 运行时加载执行,
-从而在零外部网络依赖下验证 VSA 框架自身的判定路径。
+fixture 漫画源 JS 由本模块动态生成(占位符 @BASE@ 替换, 避免与 JS 花括号混淆),
+经真实 venera 运行时加载执行, 在零外部网络依赖下验证 VSA 框架自身的判定路径。
 """
 from __future__ import annotations
 
@@ -24,20 +28,43 @@ _TINY_JPEG = base64.b64decode(
     "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA"
     "AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q=="
 )
+# 合法 JPEG 头但内容截断(解码必须失败)
+_TRUNCATED_JPEG = _TINY_JPEG[:20]
+_HTML_BODY = b"<html><body>Just a moment... cf-browser-verification</body></html>"
+_CORRUPT_BODY = b"\x00\x01\x02\x03not-an-image-at-all"
 
 COMICS = [
     {"id": "ok", "title": "VSA Fixture Comic"},
     {"id": "neg-html", "title": "VSA Negative HTML Image"},
     {"id": "neg-corrupt", "title": "VSA Negative Corrupt Image"},
     {"id": "neg-404", "title": "VSA Negative 404 Image"},
+    {"id": "neg-truncate", "title": "VSA Negative Truncated JPEG"},
+    {"id": "neg-second", "title": "VSA Negative Second Image"},
+    {"id": "neg-ssrf", "title": "VSA Negative SSRF URL"},
+    {"id": "cm-1img", "title": "VSA Count Mismatch (1 available)"},
+    {"id": "neg-pages-empty", "title": "VSA Negative Empty Pages"},
+    {"id": "mix-decode", "title": "VSA Mixed Decode (JPEG+AVIF)"},
 ]
 
-IMG_BEHAVIOR = {
-    "ok": _TINY_JPEG,
-    "neg-html": b"<html><body>bot challenge page</body></html>",
-    "neg-corrupt": b"\x00\x01\x02\x03not-an-image-at-all",
-    "neg-404": None,  # 404
-}
+
+def _img_bytes(cid: str, page: str) -> tuple[int, bytes] | None:
+    """按 (comic, 页码) 返回 (HTTP 状态, 字节); None 表示 404。"""
+    if cid == "neg-html":
+        return 200, _HTML_BODY
+    if cid == "neg-corrupt":
+        return 200, _CORRUPT_BODY
+    if cid == "neg-404":
+        return None
+    if cid == "neg-truncate":
+        return 200, _TRUNCATED_JPEG
+    if cid == "neg-second":
+        return (200, _TINY_JPEG) if page == "1.jpg" else (200, _HTML_BODY)
+    if cid == "neg-ssrf":
+        return None
+    if cid == "mix-decode" and page == "2.img":
+        # 最小 AVIF(ftyp box): 字节签名可信但无解码器
+        return 200, b"\x00\x00\x00\x18ftypavif\x00\x00\x00\x00avifmif1"
+    return 200, _TINY_JPEG
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -74,15 +101,27 @@ class _Handler(BaseHTTPRequestHandler):
                 import time
                 time.sleep(8)
             base = f"http://127.0.0.1:{self.server.server_address[1]}"
-            self._send(200, json.dumps({"data": [f"{base}/img/{cid}/1.jpg", f"{base}/img/{cid}/2.jpg"]}).encode())
+            if cid == "neg-pages-empty":
+                imgs = []
+            elif cid == "cm-1img":
+                imgs = [f"{base}/img/{cid}/1.jpg"]
+            elif cid == "mix-decode":
+                imgs = [f"{base}/img/{cid}/1.jpg", f"{base}/img/{cid}/2.img"]
+            elif cid == "neg-ssrf":
+                # 内网与云元数据地址: SSRF 护栏必须拒绝
+                imgs = ["http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:9/x.jpg"]
+            else:
+                imgs = [f"{base}/img/{cid}/1.jpg", f"{base}/img/{cid}/2.jpg"]
+            self._send(200, json.dumps({"data": imgs}).encode())
             return
         if path.startswith("/img/") and len(parts) == 3:
-            cid = parts[1]
-            body = IMG_BEHAVIOR.get(cid, _TINY_JPEG)
-            if cid == "neg-404" or body is None:
+            cid, page = parts[1], parts[2]
+            result = _img_bytes(cid, page)
+            if result is None:
                 self._send(404, b"not found", "text/plain")
                 return
-            self._send(200, body, "image/jpeg")
+            code, body = result
+            self._send(code, body, "image/jpeg")
             return
         self._send(404, b"not found", "text/plain")
 
@@ -148,6 +187,103 @@ class VsaFixture extends ComicSource {
 """
 
 
+PAGINATED_FIXTURE_TEMPLATE = """\
+class VsaPaginatedFixture extends ComicSource {
+  name = "VSA Paginated Fixture";
+  key = "vsa_paginated";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = {
+    loadNext: async (keyword, options, next) => {
+      let page = next == null ? 0 : Number(next);
+      return { comics: [new Comic({ id: page == 0 ? "ok" : "cm-1img", title: "page" + page, cover: "" })], next: page == 0 ? "1" : null };
+    },
+    optionList: [],
+  };
+  explore = [{
+    title: "next",
+    type: "multiPageComicList",
+    loadNext: async (next) => ({ comics: [new Comic({ id: "ok", title: "explore", cover: "" })], next: next == null ? "done" : null }),
+  }];
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
+MIXED_FIXTURE_TEMPLATE = """\
+class VsaMixedFixture extends ComicSource {
+  name = "VSA Mixed Fixture";
+  key = "vsa_mixed";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "search", cover: "" })], maxPage: 1 }), optionList: [] };
+  explore = [{
+    title: "mixed",
+    type: "mixed",
+    load: async (index) => ({ data: [[new Comic({ id: "ok", title: "mixed", cover: "" })], { title: "part", comics: [new Comic({ id: "cm-1img", title: "part", cover: "" })] }], maxPage: 1 }),
+  }];
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
+UNSUPPORTED_FIXTURE_TEMPLATE = """\
+class VsaUnsupportedFixture extends ComicSource {
+  name = "VSA Unsupported Fixture";
+  key = "vsa_unsupported";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "unsupported", cover: "" })], maxPage: 1 }), optionList: [] };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+  };
+}
+"""
+
+
+IMAGE_CONFIG_FAILURE_TEMPLATE = """\
+class VsaImageConfigFailure extends ComicSource {
+  name = "VSA Image Config Failure";
+  key = "vsa_image_config_failure";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => ({ comics: [new Comic({ id: "ok", title: "config", cover: "" })], maxPage: 1 }), optionList: [] };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }),
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+    onImageLoad: () => { throw new Error("fixture image config failure"); },
+  };
+}
+"""
+
+
+STATEFUL_FIXTURE_TEMPLATE = """\
+let vsaStatefulSearchSeen = false;
+class VsaStatefulFixture extends ComicSource {
+  name = "VSA Stateful Fixture";
+  key = "vsa_stateful";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = { load: async () => { vsaStatefulSearchSeen = true; return { comics: [new Comic({ id: "ok", title: "stateful", cover: "" })], maxPage: 1 }; }, optionList: [] };
+  comic = {
+    loadInfo: async (id) => { if (!vsaStatefulSearchSeen) throw new Error("stateful search marker missing"); return new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map([["ep1", "1"]]) }); },
+    loadEp: async () => ({ images: ["@BASE@/img/ok/1.jpg"] }),
+  };
+}
+"""
+
+
 BROKEN_SYNTAX_JS = """\
 class VsaBrokenSyntax extends ComicSource {
   name = "VSA Broken Syntax"
@@ -170,7 +306,7 @@ class VsaBadSearch extends ComicSource {
     },
   };
   comic = {
-    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", chapters: new Map() }),
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map() }),
     loadEp: async () => ({ images: [] }),
   };
 }
@@ -200,6 +336,29 @@ class VsaThrowInfo extends ComicSource {
 }
 """
 
+DECLARED_BROKEN_JS = """\
+/** VSA 负向: 声明受限(blocked_patterns 命中 403)但实际是 JS 解析错误 → 必须 FAIL */
+class VsaDeclaredBroken extends ComicSource {
+  name = "VSA Declared Broken";
+  key = "vsa_declared_broken";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = {
+    load: async (keyword, options, page) => {
+      // 模拟"站点改版导致 JSON 解析拿到 HTML": JS 层错误优先于受限声明
+      let res = await Network.get(`@BASE@/search?kw=x`, {});
+      let payload = JSON.parse(res.body.replace("{", "<html>"));
+      return { comics: [], maxPage: 1 };
+    },
+  };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map() }),
+    loadEp: async () => ({ images: [] }),
+  };
+}
+"""
+
 
 def generate_fixture_sources(out_dir, base_url: str) -> dict:
     """生成 fixture 源文件, 返回 key -> 文件路径。占位符 @BASE@ 避免与 JS 花括号混淆。"""
@@ -209,9 +368,21 @@ def generate_fixture_sources(out_dir, base_url: str) -> dict:
         "vsa_broken": out_dir / "vsa_broken_syntax.js",
         "vsa_badsearch": out_dir / "vsa_badsearch.js",
         "vsa_throwinfo": out_dir / "vsa_throwinfo.js",
+        "vsa_declared_broken": out_dir / "vsa_declared_broken.js",
+        "vsa_paginated": out_dir / "vsa_paginated.js",
+        "vsa_mixed": out_dir / "vsa_mixed.js",
+        "vsa_unsupported": out_dir / "vsa_unsupported.js",
+        "vsa_image_config_failure": out_dir / "vsa_image_config_failure.js",
+        "vsa_stateful": out_dir / "vsa_stateful.js",
     }
     files["vsa_fixture"].write_text(FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_broken"].write_text(BROKEN_SYNTAX_JS, encoding="utf-8")
     files["vsa_badsearch"].write_text(BAD_SEARCH_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_throwinfo"].write_text(THROW_INFO_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_declared_broken"].write_text(DECLARED_BROKEN_JS.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_paginated"].write_text(PAGINATED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_mixed"].write_text(MIXED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_unsupported"].write_text(UNSUPPORTED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_image_config_failure"].write_text(IMAGE_CONFIG_FAILURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_stateful"].write_text(STATEFUL_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     return files

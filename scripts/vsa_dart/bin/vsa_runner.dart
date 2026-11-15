@@ -3,73 +3,297 @@
 // 基于 venera_core 在真实 QuickJS 运行时内完成:
 //   1. 加载仓库原始漫画源 JS
 //   2. 调用源自身的 loadComicPages 获取图片列表
-//   3. 调用源自身的 getImageLoadingConfig(即 JS onImageLoad)获取动态请求头
-//   4. 用该请求头实际下载首图并输出 magic bytes / sha256
+//   3. 对抽样图片逐张调用源自身的 getImageLoadingConfig(即 JS onImageLoad)获取动态请求头
+//   4. 用该请求头实际下载样本图片, 输出 magic bytes / 字节数 / 解码结果 / sha256
 //
-// 这补齐了 CLI `pages` 只返回 URL、无法携带 onImageLoad 动态头的缺口。
+// 出站安全(P0-A):
+//   - 自建 Dio 注入 venera_core: JS 网络桥与本 runner 共享同一实例与 cookie jar;
+//   - 拦截器对 **JS 网络桥的全部初始请求** 做 URL/DNS 护栏;
+//   - 本 runner 的图片抓取 followRedirects=false + 手动逐跳跟随, 每一跳重走护栏;
+//   - 已知残余风险(如实声明, 详见 docs/vsa.md): DNS 校验与实际连接之间的 TOCTOU 窗口;
+//     Dio 层重定向对 JS 桥请求仍由库内部跟随(初始 URL 已护栏, 跳转目标未重校验);
+//     全链路出站隔离需进程/网络层沙箱, 本轮未实现。
 //
 // 用法:
 //   dart run bin/vsa_runner.dart --data <dir> --load <source.js> \
-//     --key <sourceKey> --comic-id <id> --ep-id <id>
-//
-// 输出 JSON:
-//   {"ok": true, "images_count": n, "image_urls": [...], "verify": {...}}
-//   {"ok": false, "error": "..."}
+//     --key <sourceKey> --comic-id <id> --ep-id <id> [--count n] [--allow-local]
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:image/image.dart' as imglib;
 import 'package:venera_core/venera_core.dart';
 
-String identifyImage(List<int> head) {
-  final b = head;
+String identifyImage(Uint8List head) {
   bool startsWith(List<int> prefix) {
-    if (b.length < prefix.length) return false;
+    if (head.length < prefix.length) return false;
     for (var i = 0; i < prefix.length; i++) {
-      if (b[i] != prefix[i]) return false;
+      if (head[i] != prefix[i]) return false;
     }
     return true;
   }
 
   if (startsWith([0xff, 0xd8, 0xff])) return 'JPEG';
-  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'PNG';
-  if (startsWith('RIFF'.codeUnits) && b.length >= 12 && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) {
+  if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    return 'PNG';
+  if (startsWith('RIFF'.codeUnits) &&
+      head.length >= 12 &&
+      head[8] == 0x57 &&
+      head[9] == 0x45 &&
+      head[10] == 0x42 &&
+      head[11] == 0x50) {
     return 'WebP';
   }
   if (startsWith('GIF8'.codeUnits)) return 'GIF';
   // ISOBMFF ftyp box: [size(4)][ftyp(4)] — AVIF/HEIF 容器
-  if (b.length >= 8 && b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 && b[7] == 0x70) {
+  if (head.length >= 8 &&
+      head[4] == 0x66 &&
+      head[5] == 0x74 &&
+      head[6] == 0x79 &&
+      head[7] == 0x70) {
     return 'AVIF';
   }
-  final ascii = String.fromCharCodes(b.take(64)).toLowerCase();
-  if (ascii.contains('<html') || ascii.contains('<!doctype')) return 'HTML(非图片)';
-  return '未知(${b.take(8).map((e) => e.toRadixString(16).padLeft(2, '0')).join()})';
+  final ascii = String.fromCharCodes(head.take(64)).toLowerCase();
+  if (ascii.contains('<html') || ascii.contains('<!doctype'))
+    return 'HTML(非图片)';
+  return '未知(${head.take(8).map((e) => e.toRadixString(16).padLeft(2, '0')).join()})';
+}
+
+/// 判断单个 IP 地址是否属于禁止访问段(环回/私网/链路本地/未指定/CGNAT)。
+/// 覆盖 IPv4、IPv6(含 ULA fc00::/7、link-local fe80::/10、loopback ::1)与
+/// IPv4-mapped IPv6(::ffff:a.b.c.d)。
+bool isForbiddenIp(InternetAddress addr) {
+  if (addr.isLoopback || addr.isLinkLocal || addr.isMulticast) {
+    return true;
+  }
+  final bytes = addr.rawAddress;
+  if (bytes.length == 4) {
+    final a = bytes[0], b = bytes[1];
+    if (a == 10 || a == 127 || a == 0) return true;
+    if (a == 172 && b >= 16 && b <= 31) return true;
+    if (a == 192 && b == 168) return true;
+    if (a == 169 && b == 254) return true;
+    if (a == 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  if (bytes.length == 16) {
+    // IPv4-mapped ::ffff:0:0/96 → 按内嵌 IPv4 重新判定
+    if (bytes[10] == 0xff && bytes[11] == 0xff) {
+      final v4 = InternetAddress.fromRawAddress(
+        Uint8List.fromList(bytes.sublist(12)),
+        type: InternetAddressType.IPv4,
+      );
+      return isForbiddenIp(v4);
+    }
+    if (bytes[0] == 0xfc || bytes[0] == 0xfd) return true; // ULA
+    if (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
+      return true; // link-local
+    if (bytes.every((e) => e == 0)) return true; // :: 未指定地址
+    return false;
+  }
+  return false;
+}
+
+/// URL 字符串护栏: scheme/host/userinfo。
+String? guardUrl(String url) {
+  Uri uri;
+  try {
+    uri = Uri.parse(url);
+  } catch (_) {
+    return 'URL 无法解析';
+  }
+  if (uri.scheme != 'http' && uri.scheme != 'https') {
+    return '非 http/https 协议: ${uri.scheme}';
+  }
+  if (uri.host.isEmpty) {
+    return 'URL 缺少主机名';
+  }
+  if (uri.userInfo.isNotEmpty) {
+    return 'URL 携带用户信息(禁止)';
+  }
+  return null;
+}
+
+/// DNS/主机护栏: 校验主机名解析结果的每一个 IP(含 IPv6/mapped)。
+/// 返回 null 表示通过; 否则返回脱敏拒绝原因。
+Future<String?> guardHost(String host, {bool allowLocal = false}) async {
+  final h = host.toLowerCase();
+  if (h == '169.254.169.254' || h == 'metadata.google.internal') {
+    return '拒绝访问云元数据地址';
+  }
+  if (h == 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) {
+    if (!allowLocal) return '拒绝访问本地/内部主机名: $host';
+    return null;
+  }
+  final literal = InternetAddress.tryParse(host);
+  if (literal != null) {
+    if (isForbiddenIp(literal) && !allowLocal) {
+      return '拒绝访问私网/环回地址: $host';
+    }
+    return null;
+  }
+  final addresses = await InternetAddress.lookup(
+    host,
+    type: InternetAddressType.any,
+  );
+  if (addresses.isEmpty) {
+    return 'DNS 解析无结果: $host';
+  }
+  for (final addr in addresses) {
+    if (isForbiddenIp(addr) && !allowLocal) {
+      return 'DNS 解析命中禁段地址: $host → ${addr.address}';
+    }
+  }
+  return null;
+}
+
+/// Origin = scheme + host + port(默认端口归一化)
+String originOf(Uri uri) {
+  final scheme = uri.scheme.toLowerCase();
+  final host = uri.host.toLowerCase();
+  final port = uri.port;
+  final defaultPort =
+      (scheme == 'https' && port == 443) || (scheme == 'http' && port == 80);
+  return defaultPort ? '$scheme://$host' : '$scheme://$host:$port';
+}
+
+/// 跨 Origin 跳转必须剥离的敏感头(小写比较)
+const sensitiveHeaders = {'authorization', 'cookie', 'proxy-authorization'};
+
+Map<String, String> headersForHop(
+  Map<String, String> headers,
+  Uri from,
+  Uri to,
+) {
+  final sameOrigin = originOf(from) == originOf(to);
+  if (sameOrigin) return headers;
+  // 跨 Origin: 只保留非敏感头; Referer 跨域一并剥离, 防泄露路径/签名
+  final out = <String, String>{};
+  headers.forEach((k, v) {
+    final lk = k.toLowerCase();
+    if (sensitiveHeaders.contains(lk)) return;
+    if (lk == 'referer') return;
+    out[k] = v;
+  });
+  return out;
+}
+
+/// 带 URL/DNS 护栏的 GET: 手动逐跳跟随重定向, 每一跳重走护栏。
+Future<Response<List<int>>> guardedGet(
+  Dio dio,
+  String url,
+  Map<String, String> headers, {
+  bool allowLocal = false,
+  int maxHops = 5,
+}) async {
+  var current = url;
+  var hopHeaders = headers;
+  for (var hop = 0; hop <= maxHops; hop++) {
+    final urlErr = guardUrl(current);
+    if (urlErr != null) {
+      throw DioException.connectionError(
+        requestOptions: RequestOptions(path: current),
+        reason: 'URL_GUARD: $urlErr',
+      );
+    }
+    final hostErr = await guardHost(
+      Uri.parse(current).host,
+      allowLocal: allowLocal,
+    );
+    if (hostErr != null) {
+      throw DioException.connectionError(
+        requestOptions: RequestOptions(path: current),
+        reason: 'DNS_GUARD: $hostErr',
+      );
+    }
+    final response = await dio.get<List<int>>(
+      current,
+      options: Options(
+        headers: hopHeaders,
+        responseType: ResponseType.bytes,
+        validateStatus: (_) => true,
+        followRedirects: false,
+        maxRedirects: 0,
+      ),
+    );
+    final code = response.statusCode ?? 0;
+    if (code >= 300 && code < 400 && code != 304) {
+      final location = response.headers.value('location');
+      if (location == null) return response;
+      final from = Uri.parse(current);
+      final to = from.resolve(location);
+      // HTTPS→HTTP 降级: 拒绝
+      if (from.scheme == 'https' && to.scheme == 'http') {
+        throw DioException.connectionError(
+          requestOptions: RequestOptions(path: current),
+          reason: 'URL_GUARD: 拒绝 HTTPS→HTTP 降级重定向',
+        );
+      }
+      // 跨 Origin: 剥离敏感头(每一跳重新计算)
+      hopHeaders = headersForHop(hopHeaders, from, to);
+      current = to.toString();
+      continue;
+    }
+    return response;
+  }
+  throw DioException.connectionError(
+    requestOptions: RequestOptions(path: url),
+    reason: 'URL_GUARD: 重定向次数超过 $maxHops',
+  );
 }
 
 Future<void> main(List<String> arguments) async {
   String? dataPath;
   String? loadFile;
   String? key;
+  String? cmd;
+  String? keyword;
   String? comicId;
   String? epId;
-  for (var i = 0; i < arguments.length - 1; i++) {
+  var page = 1;
+  var index = 0;
+  var count = 2;
+  var allowLocal = false;
+  String? next;
+  for (var i = 0; i < arguments.length; i++) {
     switch (arguments[i]) {
+      case '--cmd':
+        cmd = arguments[++i];
       case '--data':
-        dataPath = arguments[i + 1];
+        dataPath = arguments[++i];
       case '--load':
-        loadFile = arguments[i + 1];
+        loadFile = arguments[++i];
       case '--key':
-        key = arguments[i + 1];
+        key = arguments[++i];
+      case '--keyword':
+        keyword = arguments[++i];
       case '--comic-id':
-        comicId = arguments[i + 1];
+        comicId = arguments[++i];
       case '--ep-id':
-        epId = arguments[i + 1];
+        epId = arguments[++i];
+      case '--page':
+        page = int.tryParse(arguments[++i]) ?? 1;
+      case '--index':
+        index = int.tryParse(arguments[++i]) ?? 0;
+      case '--count':
+        count = int.tryParse(arguments[++i]) ?? 2;
+      case '--next':
+        next = arguments[++i];
+      case '--allow-local':
+        allowLocal = true;
     }
   }
-  if (dataPath == null || loadFile == null || key == null || comicId == null || epId == null) {
-    stderr.writeln('usage: vsa_runner --data <dir> --load <js> --key <key> --comic-id <id> --ep-id <id>');
+  if (dataPath == null || loadFile == null || key == null || cmd == null) {
+    stderr.writeln(
+      'usage: vsa_runner --cmd load|search|explore|info|pages|verify '
+      '--data <dir> --load <js> --key <key> [--keyword x] [--page n] [--index n] '
+      '[--comic-id id] [--ep-id id] [--count n] [--next token] [--allow-local]',
+    );
     exit(64);
   }
+  if (count < 1) count = 1;
 
   final out = <String, dynamic>{};
   try {
@@ -77,90 +301,433 @@ Future<void> main(List<String> arguments) async {
     if (!await dataDir.exists()) {
       await dataDir.create(recursive: true);
     }
-    // 自建 Dio 并交给 venera_core: JS 网络桥与本 runner 的图片抓取共享同一 cookie jar
+    // 自建 Dio 注入 venera_core: JS 网络桥与本 runner 共享同一实例/cookie jar。
+    // 拦截器覆盖 **JS 网络桥的全部初始请求**(URL + DNS 护栏)。
     final dio = Dio();
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final err = guardUrl(options.uri.toString());
+          if (err != null) {
+            handler.reject(
+              DioException.connectionError(
+                requestOptions: options,
+                reason: 'URL_GUARD: $err',
+              ),
+            );
+            return;
+          }
+          final hostErr = await guardHost(
+            options.uri.host,
+            allowLocal: allowLocal,
+          );
+          if (hostErr != null) {
+            handler.reject(
+              DioException.connectionError(
+                requestOptions: options,
+                reason: 'DNS_GUARD: $hostErr',
+              ),
+            );
+            return;
+          }
+          handler.next(options);
+        },
+      ),
+    );
     await ComicSourceManager().init(
       dataPath: dataPath,
       appVersion: '2.0.0',
       dio: dio,
     );
-    final source = await ComicSourceManager().installFromFile(loadFile, replace: true);
+    final source = await ComicSourceManager().installFromFile(
+      loadFile,
+      replace: true,
+    );
     if (source.key != key) {
-      // key 与参数不一致时以实际加载为准记录
       out['loaded_key'] = source.key;
     }
     final target = ComicSourceManager().find(key) ?? source;
 
-    final pages = await target.loadComicPages!(comicId, epId);
+    // 阶段子命令(load/search/explore/info/pages): 全部走受护栏 Dio,
+    // 输出与 venera CLI 同构的 JSON(chain.py 直接解析); verify 落到下方原逻辑。
+    if (cmd != 'verify') {
+      try {
+        switch (cmd) {
+          case 'load':
+            out['ok'] = true;
+            out['meta'] = {
+              'key': target.key,
+              'name': target.name,
+              'version': target.version,
+            };
+            break;
+          case 'search':
+            final search = target.searchPageData;
+            if (search == null) {
+              throw RunnerUnsupportedCapability('search');
+            }
+            final options = search.searchOptions
+                    ?.map((option) => option.defaultValue)
+                    .toList() ??
+                const [];
+            final Res<List<Comic>> res;
+            if (search.loadPage != null) {
+              res = await search.loadPage!(keyword ?? '', page, options);
+            } else if (search.loadNext != null) {
+              res = await search.loadNext!(keyword ?? '', next, options);
+            } else {
+              throw RunnerUnsupportedCapability('search.loadPage/loadNext');
+            }
+            if (res.error)
+              throw SourceStageFailure(
+                'search',
+                res.errorMessage ?? 'search error',
+              );
+            out['ok'] = true;
+            out['data'] = (res.dataOrNull ?? const <Comic>[])
+                .map((e) => e.toJson())
+                .toList();
+            out['subData'] = res.subData;
+            break;
+          case 'explore':
+            if (target.explorePages.isEmpty ||
+                index >= target.explorePages.length) {
+              throw 'explore index out of range';
+            }
+            final explore = target.explorePages[index];
+            if (explore.loadPage != null) {
+              final res = await explore.loadPage!(page);
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Comic>[])
+                  .map((e) => e.toJson())
+                  .toList();
+              out['subData'] = res.subData;
+            } else if (explore.loadNext != null) {
+              final res = await explore.loadNext!(next);
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Comic>[])
+                  .map((e) => e.toJson())
+                  .toList();
+              out['subData'] = res.subData;
+            } else if (explore.loadMultiPart != null) {
+              final res = await explore.loadMultiPart!();
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <ExplorePagePart>[])
+                  .map(
+                    (part) => {
+                      'title': part.title,
+                      'comics': part.comics.map((e) => e.toJson()).toList(),
+                    },
+                  )
+                  .toList();
+              out['subData'] = res.subData;
+            } else if (explore.loadMixed != null) {
+              final res = await explore.loadMixed!(page - 1);
+              if (res.error)
+                throw SourceStageFailure(
+                  'explore',
+                  res.errorMessage ?? 'explore error',
+                );
+              out['ok'] = true;
+              out['data'] = (res.dataOrNull ?? const <Object>[]).map((item) {
+                if (item is List<Comic>) {
+                  return {'comics': item.map((e) => e.toJson()).toList()};
+                }
+                if (item is ExplorePagePart) {
+                  return {
+                    'title': item.title,
+                    'comics': item.comics.map((e) => e.toJson()).toList(),
+                  };
+                }
+                throw RunnerProtocolFailure(
+                  'explore.loadMixed returned an unknown item',
+                );
+              }).toList();
+              out['subData'] = res.subData;
+            } else {
+              throw RunnerUnsupportedCapability(
+                'explore.loadPage/loadNext/loadMultiPart/loadMixed',
+              );
+            }
+            break;
+          case 'info':
+            if (target.loadComicInfo == null) {
+              throw RunnerUnsupportedCapability('comic.loadInfo');
+            }
+            final res = await target.loadComicInfo!(comicId ?? '');
+            if (res.error)
+              throw SourceStageFailure(
+                'info',
+                res.errorMessage ?? 'info error',
+              );
+            out['ok'] = true;
+            out['data'] = res.dataOrNull!.toJson();
+            break;
+          case 'pages':
+            if (target.loadComicPages == null) {
+              throw RunnerUnsupportedCapability('comic.loadEp');
+            }
+            final res = await target.loadComicPages!(comicId ?? '', epId ?? '');
+            if (res.error)
+              throw SourceStageFailure(
+                'pages',
+                res.errorMessage ?? 'pages error',
+              );
+            out['ok'] = true;
+            out['data'] = res.dataOrNull ?? const <String>[];
+            break;
+          default:
+            throw 'unknown cmd: $cmd';
+        }
+        stdout.writeln(jsonEncode(out));
+        exit(0);
+      } catch (e) {
+        out['ok'] = false;
+        if (e is RunnerFailure) {
+          out['error'] = e.message;
+          out['error_code'] = e.code;
+          out['error_origin'] = 'runner';
+          out['stage'] = e.stage;
+          out['evidence'] = e.evidence;
+        } else if (e is SourceStageFailure) {
+          out['error'] = e.message;
+          out['error_code'] = e.code;
+          out['error_origin'] = 'source';
+          out['stage'] = e.stage;
+        } else {
+          out['error'] = '$e';
+          out['error_code'] = 'RUNNER_EXCEPTION';
+          out['error_origin'] = 'runner';
+        }
+        stdout.writeln(jsonEncode(out));
+        exit(1);
+      }
+    }
+
+    if (target.loadComicPages == null) {
+      throw RunnerUnsupportedCapability('comic.loadEp');
+    }
+    final pages = await target.loadComicPages!(comicId ?? '', epId ?? '');
     if (pages.error) {
       out['ok'] = false;
       out['error'] = 'loadEp: ${pages.errorMessage ?? 'unknown error'}';
+      out['error_code'] = 'SOURCE_PAGES_ERROR';
+      out['error_origin'] = 'source';
+      out['stage'] = 'pages';
       stdout.writeln(jsonEncode(out));
       exit(1);
     }
-    final images = (pages.data ?? const <String>[])
+    final images = (pages.data)
         .whereType<String>()
         .where((u) => u.startsWith('http'))
         .toList();
-    out['ok'] = true;
-    out['images_count'] = images.length;
+    out['available_image_count'] = images.length;
     out['image_urls'] = images.take(3).toList();
     if (images.isEmpty) {
+      out['ok'] = false;
       out['error'] = 'No images';
+      out['error_code'] = 'SOURCE_PAGES_EMPTY';
+      out['error_origin'] = 'source';
+      out['stage'] = 'pages';
       stdout.writeln(jsonEncode(out));
       exit(1);
     }
 
-    // 首图: 通过源自身的 onImageLoad 获取动态请求头后实抓字节
-    final imageUrl = images.first;
-    Map<String, dynamic> headerConfig = {};
-    try {
-      final cfg = await target.getImageLoadingConfig?.call(imageUrl, comicId, epId);
-      if (cfg != null) {
-        headerConfig = cfg;
+    // 抽样验证: 逐张调用源自身的 onImageLoad 获取动态请求头后实抓字节
+    final requested = count;
+    final samples = images.take(requested).toList();
+    final sampleResults = <Map<String, dynamic>>[];
+    var verified = 0;
+    var decoded = 0;
+    var decodeUnsupported = 0;
+    for (var i = 0; i < samples.length; i++) {
+      final imageUrl = samples[i];
+      final sample = <String, dynamic>{'index': i};
+      Map<String, dynamic> headerConfig = {};
+      try {
+        final cfg = await target.getImageLoadingConfig?.call(
+          imageUrl,
+          comicId ?? '',
+          epId ?? '',
+        );
+        if (cfg != null) {
+          headerConfig = cfg;
+        }
+      } catch (e) {
+        out['ok'] = false;
+        out['error'] = 'getImageLoadingConfig failed';
+        out['error_code'] = 'IMAGE_CONFIG_ERROR';
+        out['error_origin'] = 'source';
+        out['stage'] = 'image';
+        out['evidence'] = {'kind': 'callback_exception'};
+        stdout.writeln(jsonEncode(out));
+        exit(1);
       }
-    } catch (e) {
-      out['image_config_error'] = '$e';
-    }
-    final headers = <String, String>{};
-    final rawHeaders = headerConfig['headers'];
-    if (rawHeaders is Map) {
-      rawHeaders.forEach((k, v) => headers[k.toString()] = v.toString());
-    }
-    String fetchUrl = imageUrl;
-    if (headerConfig['url'] is String && (headerConfig['url'] as String).isNotEmpty) {
-      fetchUrl = headerConfig['url'] as String;
-    }
-    if (!headers.containsKey('User-Agent') || headers['User-Agent']!.isEmpty) {
-      headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      final headers = <String, String>{};
+      final rawHeaders = headerConfig['headers'];
+      if (rawHeaders != null && rawHeaders is! Map) {
+        out['ok'] = false;
+        out['error'] = 'getImageLoadingConfig returned invalid headers';
+        out['error_code'] = 'IMAGE_CONFIG_ERROR';
+        out['error_origin'] = 'source';
+        out['stage'] = 'image';
+        out['evidence'] = {'kind': 'invalid_headers'};
+        stdout.writeln(jsonEncode(out));
+        exit(1);
+      }
+      if (rawHeaders is Map) {
+        rawHeaders.forEach((k, v) => headers[k.toString()] = v.toString());
+      }
+      String fetchUrl = imageUrl;
+      if (headerConfig['url'] is String &&
+          (headerConfig['url'] as String).isNotEmpty) {
+        fetchUrl = headerConfig['url'] as String;
+      }
+      if (!headers.containsKey('User-Agent') ||
+          headers['User-Agent']!.isEmpty) {
+        headers['User-Agent'] =
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      }
+      try {
+        final response = await guardedGet(
+          dio,
+          fetchUrl,
+          headers,
+          allowLocal: allowLocal,
+        );
+        final bytes = response.data!;
+        final magic = identifyImage(Uint8List.fromList(bytes));
+        sample['url'] = fetchUrl.split('?').first;
+        sample['status'] = response.statusCode;
+        sample['magic'] = magic;
+        sample['size'] = bytes.length;
+        sample['sha256'] = bytes.isEmpty
+            ? ''
+            : sha256.convert(bytes.take(1 << 20).toList()).toString();
+        final okStatus = response.statusCode == 200 && bytes.isNotEmpty;
+        final trustedImage = magic != 'HTML(非图片)' && !magic.startsWith('未知');
+        if (!okStatus || !trustedImage) {
+          sample['verified'] = false;
+          sample['error'] = !okStatus
+              ? 'IMAGE_HTTP_ERROR'
+              : (magic == 'HTML(非图片)'
+                  ? 'IMAGE_HTML_INSTEAD_OF_IMAGE'
+                  : 'IMAGE_UNRECOGNIZED');
+          sampleResults.add(sample);
+          break;
+        }
+        // WebP 不区分 VP8/VP8L/VP8X 变体, 统一尝试解码(package:image 支持)
+        final decodable = magic == 'JPEG' ||
+            magic == 'PNG' ||
+            magic == 'GIF' ||
+            magic == 'WebP';
+        if (decodable) {
+          try {
+            final decodedImg = imglib.decodeImage(Uint8List.fromList(bytes));
+            sample['decoded'] = decodedImg != null;
+            sample['width'] = decodedImg?.width;
+            sample['height'] = decodedImg?.height;
+            if (decodedImg == null) {
+              sample['verified'] = false;
+              sample['error'] = 'IMAGE_DECODE_FAILED';
+              sampleResults.add(sample);
+              break;
+            }
+          } catch (e) {
+            sample['decoded'] = false;
+            sample['verified'] = false;
+            sample['error'] = 'IMAGE_DECODE_FAILED: $e';
+            sampleResults.add(sample);
+            break;
+          }
+          decoded++;
+        } else {
+          // AVIF 等无解码器格式: 字节签名可信, 如实记录未执行解码
+          sample['decoded'] = null;
+          sample['note'] = '字节格式可信但运行时无解码器, 未执行解码';
+          decodeUnsupported++;
+        }
+        sample['verified'] = true;
+        verified++;
+      } catch (e) {
+        final reason = '$e';
+        sample['verified'] = false;
+        sample['status'] = 'ERR';
+        sample['error'] =
+            reason.startsWith('URL_GUARD') || reason.startsWith('DNS_GUARD')
+                ? 'URL_GUARD_REJECTED'
+                : 'IMAGE_FETCH_ERROR';
+        sample['error_detail'] = reason;
+        sampleResults.add(sample);
+        break;
+      }
+      sampleResults.add(sample);
     }
 
-    final response = await dio.get<List<int>>(
-      fetchUrl,
-      options: Options(
-        headers: headers,
-        responseType: ResponseType.bytes,
-        validateStatus: (_) => true,
-        followRedirects: true,
-      ),
-    );
-    final bytes = response.data ?? const <int>[];
-    final head = bytes.length > 64 ? bytes.sublist(0, 64) : bytes;
-    out['verify'] = {
-      'url': fetchUrl.split('?').first,
-      'status': response.statusCode,
-      'magic': identifyImage(head),
-      'size': bytes.length,
-      'headers_used': headers.keys.toList(),
-    };
+    out['ok'] = verified > 0;
+    out['requested_image_count'] = requested;
+    out['attempted_image_count'] = sampleResults.length;
+    out['verified_image_count'] = verified;
+    out['decoded_image_count'] = decoded;
+    out['unsupported_decode_count'] = decodeUnsupported;
+    out['samples'] = sampleResults;
     stdout.writeln(jsonEncode(out));
-    exit(response.statusCode == 200 ? 0 : 1);
+    exit(verified > 0 ? 0 : 1);
   } catch (e, s) {
     out['ok'] = false;
     out['error'] = '$e';
+    out['error_code'] = 'RUNNER_EXCEPTION';
     out['stack'] = s.toString().split('\n').take(4).join('\n');
     stdout.writeln(jsonEncode(out));
     exit(1);
   }
+}
+
+abstract class RunnerFailure implements Exception {
+  String get code;
+  String get message;
+  String get stage;
+  Map<String, dynamic> get evidence;
+}
+
+class RunnerUnsupportedCapability implements RunnerFailure {
+  final String capability;
+  RunnerUnsupportedCapability(this.capability);
+  String get code => 'RUNNER_UNSUPPORTED_CAPABILITY';
+  String get message =>
+      'Runner does not implement supported capability: $capability';
+  String get stage => 'runner';
+  Map<String, dynamic> get evidence => {'capability': capability};
+}
+
+class RunnerProtocolFailure implements RunnerFailure {
+  final String detail;
+  RunnerProtocolFailure(this.detail);
+  String get code => 'RUNNER_PROTOCOL_ERROR';
+  String get message => detail;
+  String get stage => 'runner';
+  Map<String, dynamic> get evidence => {};
+}
+
+class SourceStageFailure implements Exception {
+  final String stage;
+  final String message;
+  SourceStageFailure(this.stage, this.message);
+  String get code => 'SOURCE_${stage.toUpperCase()}_ERROR';
 }
