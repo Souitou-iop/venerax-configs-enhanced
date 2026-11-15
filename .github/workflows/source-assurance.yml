@@ -1,5 +1,9 @@
 name: Source Assurance (VSA)
 
+concurrency:
+  group: vsa-live-${{ github.ref }}
+  cancel-in-progress: false
+
 # Layer 2 真实漫画源 JS 验收: 通过官方 venera_cli(QuickJS 运行时)执行仓库源文件,
 # 完成 搜索→详情→章节→图片字节 全链路(含薄 Dart runner 的 onImageLoad 动态头取图)。
 # 与 Layer 1 网站健康探针(health-check.yml)互相独立: Layer 1 绿灯不继承为 Layer 2 通过。
@@ -42,6 +46,7 @@ jobs:
         run: python scripts/source_assurance.py --check-coverage --output /tmp/vsa_out
 
       - name: Run VSA live acceptance (strict, 全链路 runner 化)
+        id: live
         run: |
           python scripts/source_assurance.py --all \
             --runner /tmp/vsa_runner/bundle/bin/vsa_runner \
@@ -55,3 +60,112 @@ jobs:
           name: vsa-reports
           path: /tmp/vsa_out/
           retention-days: 14
+
+      - name: Preserve strict VSA exit status
+        if: always()
+        run: |
+          if [ "${{ steps.live.outcome }}" = "failure" ]; then
+            exit 1
+          fi
+
+  diagnose:
+    if: always()
+    needs: assure
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download VSA report artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: vsa-reports
+          path: /tmp/vsa_reports
+
+      - name: Read history branch
+        run: |
+          mkdir -p /tmp/vsa_history/snapshots
+          git fetch origin vsa-history || true
+          if git show-ref --verify --quiet refs/remotes/origin/vsa-history; then
+            git archive origin/vsa-history | tar -x -C /tmp/vsa_history
+          fi
+
+      - name: Generate Diagnose summary
+        id: diagnose
+        run: |
+          report=$(find /tmp/vsa_reports -type f -name 'vsa-live-*.json' -print -quit)
+          if [ -z "$report" ]; then
+            echo '没有有效 VSA JSON，无法生成 Diagnose 摘要。' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python scripts/source_assurance.py --diagnose \
+            --report "$report" \
+            --history-dir /tmp/vsa_history/snapshots \
+            --run-id "$GITHUB_RUN_ID" \
+            --prune-history-days 90 \
+            --output /tmp/vsa_diagnose
+
+      - name: Upload Diagnose artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsa-diagnose
+          path: |
+            /tmp/vsa_diagnose/
+            /tmp/vsa_history/snapshots/
+          retention-days: 14
+
+  archive-history:
+    if: always() && github.event_name != 'pull_request' && needs.diagnose.result != 'cancelled'
+    needs: diagnose
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Diagnose artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: vsa-diagnose
+          path: /tmp/vsa_diagnose
+
+      - name: Archive sanitized history
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          snapshot=$(find /tmp/vsa_diagnose -type f -path '*/snapshots/*.json' -print -quit)
+          if [ -z "$snapshot" ]; then
+            echo '没有可归档的脱敏历史快照。'
+            exit 0
+          fi
+          rm -rf /tmp/vsa-history-repo
+          if git ls-remote --exit-code origin refs/heads/vsa-history >/dev/null 2>&1; then
+            git clone --depth=1 --branch vsa-history "https://x-access-token:${GITHUB_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git" /tmp/vsa-history-repo
+          else
+            mkdir -p /tmp/vsa-history-repo
+            git -C /tmp/vsa-history-repo init
+            git -C /tmp/vsa-history-repo remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+            git -C /tmp/vsa-history-repo checkout --orphan vsa-history
+          fi
+          mkdir -p /tmp/vsa-history-repo/snapshots
+          cp /tmp/vsa_diagnose/*/snapshots/*.json /tmp/vsa-history-repo/snapshots/ 2>/dev/null || cp "$snapshot" /tmp/vsa-history-repo/snapshots/
+          git -C /tmp/vsa-history-repo config user.name 'github-actions[bot]'
+          git -C /tmp/vsa-history-repo config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C /tmp/vsa-history-repo add snapshots
+          if git -C /tmp/vsa-history-repo diff --cached --quiet; then
+            echo '历史没有新增内容。'
+            exit 0
+          fi
+          git -C /tmp/vsa-history-repo commit -m "chore: archive VSA Diagnose history"
+          git -C /tmp/vsa-history-repo push origin HEAD:vsa-history
