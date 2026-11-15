@@ -53,7 +53,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.environ.get('E2E_OUT_DIR') or os.path.join(ROOT, 'work', 'e2e_run')
 PRODUCTION = False
 WRITE_README = False
-KNOWN_RESTRICTED_SOURCES = {'ikmmh', 'ManHuaGui'}
+KNOWN_RESTRICTED_SOURCES = {'ikmmh', 'ManHuaGui', 'ykmh'}
 BEIJING_TZ = timezone(timedelta(hours=8))
 CCC_MAINTENANCE_START = datetime(2026, 10, 3, 10, tzinfo=BEIJING_TZ)
 CCC_MAINTENANCE_END = datetime(2026, 10, 4, 18, tzinfo=BEIJING_TZ)
@@ -1417,8 +1417,11 @@ def conn_probe(key):
             # 爱看漫真实域名仅大陆网络可达, 海外/代理网络永久 403, 属已知网络限制而非站点故障。
             detail = (f"HTTP {code} —— 站点拦截海外/机房网络；"
                       "www.ikmmh.com 仅大陆网络可达, 出海或代理环境无法使用")
+        elif key == 'ykmh':
+            detail = (f"HTTP {code} —— Cloudflare 拦截当前探测出口；"
+                      "连通级探针无法判断正文是否可读")
         else:
-            detail = f"HTTP {code} —— 现行探针对此亮绿灯" + tail
+            detail = f"HTTP {code} —— 站点或出口被拦截" + tail
         return result('BLOCKED', 'conn', code=code, detail=detail, steps=steps)
     if code == 210:
         return result('RISK_CONTROL', 'conn', code=code,
