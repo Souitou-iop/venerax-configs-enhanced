@@ -4,8 +4,9 @@ concurrency:
   group: vsa-live-${{ github.ref }}
   cancel-in-progress: false
 
-# Layer 2 真实漫画源 JS 验收: 通过官方 venera_cli(QuickJS 运行时)执行仓库源文件,
-# 完成 搜索→详情→章节→图片字节 全链路(含薄 Dart runner 的 onImageLoad 动态头取图)。
+# Layer 2 真实漫画源 JS 验收: live 路径通过基于 venera_core 的薄 Dart runner(内部 QuickJS 运行时)执行仓库源文件,
+# 完成 加载→搜索/探索→详情→章节→图片字节 全链路; 图片阶段调用 onImageLoad 动态头取图。
+# Diagnose 读取原始报告生成历史对比摘要, 归档 job 写入 vsa-history; 两者不改变严格验收状态。
 # 与 Layer 1 网站健康探针(health-check.yml)互相独立: Layer 1 绿灯不继承为 Layer 2 通过。
 on:
   schedule:

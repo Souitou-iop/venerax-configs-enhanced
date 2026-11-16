@@ -4,7 +4,7 @@ on:
   schedule:
     
     # Target: 08:15 and 20:15 Beijing Time (UTC 00:15 and 12:15).
-    # GitHub may delay scheduled runs under platform load; actual start time is recorded in artifacts/README.
+    # GitHub may delay scheduled runs under platform load; actual start time is recorded in the run summary and artifacts.
     - cron: '15 0,12 * * *'
   workflow_dispatch:
 
@@ -97,7 +97,7 @@ jobs:
                 echo ""
                 echo "- **运行记录**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
                 echo "- **现象**: 探针进程在写出 results.json 之前异常退出，说明脚本未跑完——大概率是脚本 bug、Python 环境或流程改动引入，而非漫画源本身故障。"
-                echo "- **影响**: 本轮 README 未更新，源级告警状态机未推进。"
+                echo "- **影响**: 本轮未生成 results.json，源级告警状态机未推进。"
                 echo ""
                 echo "请查看该次运行日志定位崩溃点，修复后可关闭本 Issue。同一时刻只保留一条未关闭的崩溃告警，不会重复刷屏。"
               } > /tmp/probe_crash_alert.md

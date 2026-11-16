@@ -1,6 +1,6 @@
 # Venera Source Assurance (VSA) 使用文档
 
-VSA 是 Layer 2 **真实漫画源 JS 验收系统**:通过官方 [venera_cli](https://github.com/venera-app/venera_cli)(QuickJS 运行时)加载并执行仓库中的**原始漫画源 JS 文件**,走完 加载 → 元数据核对 → 搜索/探索 → 详情 → 章节 → **真实图片字节抽样下载** 全链路,产出结构化验收报告。
+VSA 是 Layer 2 **真实漫画源 JS 验收系统**:live 路径通过基于官方 [venera_core](https://github.com/venera-app/venera_core) 的薄 Dart runner(`scripts/vsa_dart/`,内部运行 QuickJS)加载并执行仓库中的**原始漫画源 JS 文件**,走完 加载 → 元数据核对 → 搜索/探索 → 详情 → 章节 → **真实图片字节抽样下载** 全链路,产出结构化验收报告。PR 的源加载校验与离线自检仍使用固定 commit 的 [venera_cli](https://github.com/venera-app/venera_cli)。
 
 它解决的是 Layer 1(Python 网站健康探针)无法覆盖的问题:**探针正常,但真实源 JS 不可用**。两者互相独立、互不继承结果。
 
@@ -126,10 +126,10 @@ Runner 按 `venera_core` 的实际类型执行接口。`loadPage` 与 `loadNext`
 
 | 工作流 | 触发 | 内容 |
 |---|---|---|
-| `source-assurance.yml` | 每日 03:30 UTC + 手动 | 固定 commit 构建 venera_cli(`VSA_CLI_PIN`)+ 构建 Dart runner + 覆盖率门槛 + 严格模式全量验收;报告/artifact 留存 14 天 |
-| `pr-source-validate.yml` | Pull Request | 加载级校验 + **覆盖率门槛** + 离线负向回归(确定性, 不依赖第三方站点);权限 contents:read, 不向源 JS 暴露 Secrets |
+| `source-assurance.yml` | 每日 03:30 UTC + 手动 | 构建 Dart runner + 覆盖率门槛 + 严格模式全量验收 + Diagnose 摘要/归档;原始与 Diagnose Artifact 留存 14 天, 脱敏历史快照留存 90 天 |
+| `pr-source-validate.yml` | Pull Request | 固定 commit 构建 venera_cli + Dart runner;加载级校验 + **覆盖率门槛** + 离线负向回归(确定性, 不依赖第三方站点);权限 contents:read, 不写历史分支 |
 
-运行时/runner 构建来源 commit 写入报告 meta(`runtime_build_id`/`runner_build_id`), 保证结果可复现。升级 venera_cli 时人工更新 `VSA_CLI_PIN` 并核对上游 CHANGELOG。
+运行时/runner 构建来源 commit 写入报告 meta(`runtime_build_id`/`runner_build_id`), 保证结果可复现。PR 自检的 venera_cli 由 `VSA_CLI_PIN`/`scripts/vsa/RUNTIME_PIN` 固定;live runner 的 venera_core 由 `scripts/vsa_dart/pubspec.lock` 锁定。升级为人工流程。
 
 ## 为新源添加验收配置
 
@@ -156,7 +156,7 @@ sources:
 1. **运行时 UA**:venera 运行时默认 Chrome/120 UA(`venera_core/_Config.userAgent`);MangaDex 等对"浏览器 UA + 机房 IP"弹 bot 挑战。自动挑战探测无法复现运行时头指纹, 因此 MangaDex 以 FAIL 呈现(人工已用 curl 复核挑战页证据, 记录于此);待上游支持按源注入 UA 后转完整验收。
 2. **机房网络限制**:cdndm5 图域、部分站点对 GitHub runner/机房 IP 拦截(403/拒连/超时)。这些源声明了 `blocked_patterns`, 在受限环境归 BLOCKED, 在可达环境仍可 PASS——环境限制不替源码背锅, 证据始终可见。
 3. **登录/付费**:需账号态的源(哔咔/百合会/CCC 等)以 `AUTH_REQUIRED` BLOCKED 呈现, 登录后链路仍以真机验收为准。
-4. **运行时版本**:CI 固定 venera_cli commit(`VSA_CLI_PIN`);venera_core 由 `scripts/vsa_dart/pubspec.lock` 锁定。升级为人工流程。
+4. **运行时版本**:live CI 直接构建 `scripts/vsa_dart` runner,venera_core 由 `pubspec.lock` 锁定;PR 自检的 venera_cli 由 `VSA_CLI_PIN`/`scripts/vsa/RUNTIME_PIN` 固定。升级为人工流程。
 
 ## 设计问答(为什么这样设计)
 
