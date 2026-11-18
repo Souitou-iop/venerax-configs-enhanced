@@ -1,0 +1,2834 @@
+{
+  "diagnose_history_schema_version": 1,
+  "run_id": "44300112545",
+  "report_hash": "8d370683200c083197b513faabe60ee6fbbd0d0b5432a42faa27df2167817107",
+  "captured_at": "2026-11-18T12:16:21.262946",
+  "context": {
+    "mode": "live",
+    "strict": true,
+    "runtime_build_id": "f1fab426874311a0b355473082c16582e6861a25",
+    "runner_build_id": "0f85cc51bbaa5a9fb970f855bf2f5a980bee2126",
+    "config_hash": "c7960739fe7cb0f9",
+    "platform": "Linux-7.0.0-1016-aws-x86_64-with-glibc2.43",
+    "environment_id": "",
+    "source_commit": "0f85cc51bbaa5a9fb970f855bf2f5a980bee2126"
+  },
+  "complete": true,
+  "source_count": 46,
+  "sources": [
+    {
+      "key": "copy_manga",
+      "name": "拷贝漫画",
+      "version": "1.6.1",
+      "source_sha256": "e0a8d25704b83e3efcf757c0f6b80449bb2404bab5852ec5948a8ded44a99eea",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "13",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "13",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "Komiic",
+      "name": "Komiic",
+      "version": "1.1.7",
+      "source_sha256": "65bb00adc2bd6995fbfafee12ebc70801080bffe04cd55656283c146acab5d45",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "21",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "21",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manga_dex",
+      "name": "MangaDex",
+      "version": "1.2.1",
+      "source_sha256": "57d496413054e484e3be3f616fe9e118e0f926edb32edb3644a989c5184084c5",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "zaimanhua",
+      "name": "再漫画",
+      "version": "1.0.3",
+      "source_sha256": "ed96dc12e3820510493520f6714be67940674afe38dcbbd46fad58d4f578113f",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "20",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "20",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "baozi",
+      "name": "包子漫画",
+      "version": "1.1.9",
+      "source_sha256": "5be0bab82e4ec66240213d50c6f7c6529f1ef930d3585861a0e3a7198d81314d",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manhuaren",
+      "name": "漫画人",
+      "version": "2.0.1",
+      "source_sha256": "2891d52138363d91c050d8c438581094c3950300ac6385170482522f538a213b",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "199",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "199",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "ikmmh",
+      "name": "爱看漫",
+      "version": "1.0.6",
+      "source_sha256": "9b22664dd339b957143538114455c3160772b270f796598f216509c722435589",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "suspected_cause": "unknown",
+        "evidence_type": "stderr"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "suspected_cause": "unknown",
+            "evidence_type": "stderr"
+          }
+        }
+      ]
+    },
+    {
+      "key": "ManHuaGui",
+      "name": "漫画柜",
+      "version": "2.0.0",
+      "source_sha256": "af7d872d71a28b745b2f8168a8054ac0a30196360b1bdabe6c3a77f02c3ffcca",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "51",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "51",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "jm",
+      "name": "禁漫天堂",
+      "version": "1.4.4",
+      "source_sha256": "b0787b34fa6ecbc9257b70dd5edb5d9d39f83c85d91c775add5099563c9b9cf3",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "12",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "12",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "picacg",
+      "name": "Picacg",
+      "version": "1.0.9",
+      "source_sha256": "4bf2f14ffe145aa17a60a8dec85d4e68d2b85ebf810928e4a6efbff6830a1039",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "ehentai",
+      "name": "ehentai",
+      "version": "1.2.5",
+      "source_sha256": "b051ff06c4f68028f9e3fc32e7025d8a0d68967809d55bdd8bc3a570b3411d8e",
+      "state": "FAIL",
+      "error_code": "SOURCE_PAGES_ERROR",
+      "verification_level": "source_chain",
+      "evidence": {
+        "suspected_cause": "unknown",
+        "evidence_type": "stderr"
+      },
+      "first_failed_stage": "pages",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "FAIL",
+          "error_code": "SOURCE_PAGES_ERROR",
+          "evidence": {
+            "suspected_cause": "unknown",
+            "evidence_type": "stderr"
+          }
+        }
+      ]
+    },
+    {
+      "key": "nhentai",
+      "name": "nhentai",
+      "version": "2.0.0",
+      "source_sha256": "afae986bd5ea90f4bb9338041a801012e3a2dd782ccf3781ed4eca2631940746",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "14",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "14",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "hitomi",
+      "name": "hitomi.la",
+      "version": "2.0.1",
+      "source_sha256": "866e01e7e78e2c0b6cc54bba93ae77b99e87988b9a672244c1da7bafc2b51941",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_bytes",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "60",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "",
+          "unsupported_decode_count": "2"
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "60",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "",
+              "unsupported_decode_count": "2"
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "wnacg",
+      "name": "紳士漫畫",
+      "version": "2.0.2",
+      "source_sha256": "2da774ef42e0f0e857dab62dfb7e00fdf4ceecea22ddc86222cee828648c03da",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "136",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "136",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "shonen_jump_plus",
+      "name": "少年ジャンプ＋",
+      "version": "1.1.4",
+      "source_sha256": "bfc85bdf3f05fb49899a046a5a5a3d419b4d1d0d6081e4ee34f91d57161c08ab",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "comic_walker",
+      "name": "カドコミ",
+      "version": "1.1.0",
+      "source_sha256": "928dc800f373c58d342c5a903283fa66d2c484507943bc903ffbf5ffed468d49",
+      "state": "FAIL",
+      "error_code": "SOURCE_PAGES_ERROR",
+      "verification_level": "source_chain",
+      "evidence": {
+        "suspected_cause": "unknown",
+        "evidence_type": "stderr"
+      },
+      "first_failed_stage": "pages",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "FAIL",
+          "error_code": "SOURCE_PAGES_ERROR",
+          "evidence": {
+            "suspected_cause": "unknown",
+            "evidence_type": "stderr"
+          }
+        }
+      ]
+    },
+    {
+      "key": "ccc",
+      "name": "CCC追漫台",
+      "version": "1.0.3",
+      "source_sha256": "05d708b5d02f9b29153b9a46065a5625c95178a3abb4831709d659e1c82d57fa",
+      "state": "FAIL",
+      "error_code": "SOURCE_PAGES_ERROR",
+      "verification_level": "source_chain",
+      "evidence": {
+        "suspected_cause": "unknown",
+        "evidence_type": "stderr"
+      },
+      "first_failed_stage": "pages",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "FAIL",
+          "error_code": "SOURCE_PAGES_ERROR",
+          "evidence": {
+            "suspected_cause": "unknown",
+            "evidence_type": "stderr"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manga51",
+      "name": "51漫画",
+      "version": "1.1.0",
+      "source_sha256": "dd5911120ea9be8a98a5f4cb642796f27a7d4b23c75f0110c99fe7e6c8d53c64",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "27",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "27",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "rumanhua",
+      "name": "如漫画",
+      "version": "1.1.0",
+      "source_sha256": "de5a00353b1d04ae7b6efe5cb7647eb1c442f879ce5e0b28913eacd2d4d26b11",
+      "state": "BLOCKED",
+      "error_code": "NETWORK_STATUS_BLOCKED",
+      "verification_level": "source_chain",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "13",
+          "images_attempted": "1",
+          "images_verified": "",
+          "decoded_image_count": "",
+          "unsupported_decode_count": ""
+        },
+        "confidence": "medium",
+        "suspected_cause": "uncertain",
+        "http_status": 403,
+        "evidence_type": "http_status",
+        "expected_environment_constraint": true
+      },
+      "first_failed_stage": "image",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "BLOCKED",
+          "error_code": "NETWORK_STATUS_BLOCKED",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "13",
+              "images_attempted": "1",
+              "images_verified": "",
+              "decoded_image_count": "",
+              "unsupported_decode_count": ""
+            },
+            "confidence": "medium",
+            "suspected_cause": "uncertain",
+            "http_status": 403,
+            "evidence_type": "http_status",
+            "expected_environment_constraint": true
+          }
+        }
+      ]
+    },
+    {
+      "key": "mkzhan",
+      "name": "漫客栈",
+      "version": "1.0.1",
+      "source_sha256": "cc1e896d88eb98509cf393b24233502884e7dffdb62aac66b872bcedb4e4d450",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "10",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "10",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "dongmanla",
+      "name": "动漫啦",
+      "version": "1.0.2",
+      "source_sha256": "62792a2b17e4d15efd9b6780287dde1487aeecbcda239dcfae6b963dfa9f9c9a",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "4",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "4",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "mangabz",
+      "name": "Mangabz",
+      "version": "1.0.0",
+      "source_sha256": "cc0980b8961291596bebd58dedefe1732a89b2fd477823cbc39dcdb74d36a13d",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "17",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "17",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "kanman",
+      "name": "看漫画",
+      "version": "1.0.0",
+      "source_sha256": "64013d8686ae466795681cb2cb8735fb424d4fa8d132f815d71ed4c0cdd8e4c8",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "1",
+          "images_attempted": "1",
+          "images_verified": "1",
+          "decoded_image_count": "1",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "1",
+              "images_attempted": "1",
+              "images_verified": "1",
+              "decoded_image_count": "1",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "baihehui",
+      "name": "百合会",
+      "version": "1.0.1",
+      "source_sha256": "e44c32f5a860045e89ced7649366e26756971d38290a2bbb2e652ab4ae62c1a0",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "comick",
+      "name": "comick",
+      "version": "1.2.2",
+      "source_sha256": "310c325856955a9910ec871fb8579292313e0ef3fcb282084f5010af6f3d83df",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "78",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "78",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "hcomic",
+      "name": "H-Comic",
+      "version": "1.0.0",
+      "source_sha256": "d720a91a1036f705878c4922da25100c672969671332f1016463e0157ab8738d",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "14",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "14",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "hot_manga",
+      "name": "热辣漫画",
+      "version": "1.0.1",
+      "source_sha256": "39040576f4b5c5b17a584d9879adc0b9526e0966d473cfd1bc617201842ca098",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "5",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "5",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manwaba",
+      "name": "漫蛙漫画",
+      "version": "2.0.5",
+      "source_sha256": "54475b856c0e437bc6edba38a7f408bdd0e6ccb3ddb6378fcb2185c6331b1d23",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "92",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "92",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "mxs",
+      "name": "漫小肆",
+      "version": "1.0.2",
+      "source_sha256": "19cd942031e24d4efe5794bdf8547d0d6272fa4eee109224d15e9e42e10e89ef",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "122",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "122",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "xmanhua",
+      "name": "X漫画",
+      "version": "1.0.0",
+      "source_sha256": "5ecf6e915b2a28f0fd5a0c5b15bf39a71628aeab6540393aa257de67812930b4",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "17",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "17",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "sisimanhua",
+      "name": "思思漫画",
+      "version": "1.0.0",
+      "source_sha256": "8f97450fa28bcf62c2b24abed8c90951ee44c8e13103d61e59f0614c338caa88",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "249",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "249",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "bukamh",
+      "name": "布卡漫画",
+      "version": "1.0.0",
+      "source_sha256": "5c85737cdbbea975bd23a62e2ca25b5416ccb95e4ac5936878bade134efebff1",
+      "state": "FAIL",
+      "error_code": "SOURCE_INFO_ERROR",
+      "verification_level": "source_chain",
+      "evidence": {
+        "suspected_cause": "unknown",
+        "evidence_type": "js_error"
+      },
+      "first_failed_stage": "info",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "FAIL",
+          "error_code": "SOURCE_INFO_ERROR",
+          "evidence": {
+            "suspected_cause": "unknown",
+            "evidence_type": "js_error"
+          }
+        }
+      ]
+    },
+    {
+      "key": "hipmh",
+      "name": "嬉皮漫画",
+      "version": "1.0.1",
+      "source_sha256": "d6f240e297f9e82cba0f471bfdee071d2a666e11459ced8294211c94d0ea6bda",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "25",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "25",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "wmanhua",
+      "name": "W漫画",
+      "version": "1.0.5",
+      "source_sha256": "2933291187b25d288081cca9f68c43bda4be3f50f46c0d5096079ab40e81d794",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "9",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "9",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "shenqimanhua",
+      "name": "神奇漫画",
+      "version": "1.1.1",
+      "source_sha256": "020006ad5096e3d5e56ce3e496e995afcd32ab15e1920435cf5950017fddc415",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "46",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "46",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manben",
+      "name": "漫本",
+      "version": "1.0.1",
+      "source_sha256": "510e579b7d40babd86f987eec4932082417e71638a491ccee1ce28ba5b9a636a",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "2",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "2",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "mhkan",
+      "name": "漫画看",
+      "version": "1.0.0",
+      "source_sha256": "051ccdadf5dd2da274f0afd1b281bd52e43e32d7d9c47a29015d9f5282e231b3",
+      "state": "FAIL",
+      "error_code": "IMAGE_HTTP_ERROR",
+      "verification_level": "source_chain",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "4",
+          "images_attempted": "1",
+          "images_verified": "",
+          "decoded_image_count": "",
+          "unsupported_decode_count": ""
+        },
+        "suspected_cause": "uncertain",
+        "http_status": 404,
+        "evidence_type": "http_status",
+        "expected_environment_constraint": false
+      },
+      "first_failed_stage": "image",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "FAIL",
+          "error_code": "IMAGE_HTTP_ERROR",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "4",
+              "images_attempted": "1",
+              "images_verified": "",
+              "decoded_image_count": "",
+              "unsupported_decode_count": ""
+            },
+            "suspected_cause": "uncertain",
+            "http_status": 404,
+            "evidence_type": "http_status",
+            "expected_environment_constraint": false
+          }
+        }
+      ]
+    },
+    {
+      "key": "remenmanhua",
+      "name": "热门漫画",
+      "version": "1.0.0",
+      "source_sha256": "01e7188b1f01c1147ca19d4816a14fa892aac0ef8d9c5d5c5590ce2619149daa",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "3",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "3",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "manhuapi",
+      "name": "漫画皮",
+      "version": "1.0.0",
+      "source_sha256": "50f7411e9c2bd2e162f370b5cfa1149f1527c7b203e4eef601cc85647c8e3d14",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "7",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "7",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "dm5",
+      "name": "动漫屋",
+      "version": "1.0.0",
+      "source_sha256": "00d968a966de8337ee1cb91c35a8cd4e6eacd019e52bd49cb2e3fedeab2878aa",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "12",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "12",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "jisu",
+      "name": "极速漫画",
+      "version": "1.0.0",
+      "source_sha256": "095d7eb4954e970fafbdaa804d03ab0b3d00d5fac31417668cb1999529644b87",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "2",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "2",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "zymk",
+      "name": "知音漫客",
+      "version": "1.0.0",
+      "source_sha256": "74869e340bcc8956b135fe35293151d62271098ee30015ed2b4e2e1561cae6a4",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "1",
+          "images_attempted": "1",
+          "images_verified": "1",
+          "decoded_image_count": "1",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "1",
+              "images_attempted": "1",
+              "images_verified": "1",
+              "decoded_image_count": "1",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "rawkuma",
+      "name": "Rawkuma",
+      "version": "1.0.0",
+      "source_sha256": "74677d419658248964b32fdabc71a0ea3aaa1bef500d3d75189a102914afdc8b",
+      "state": "FAIL",
+      "error_code": "SOURCE_EXPLORE_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_EXPLORE_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "jcomic",
+      "name": "JComic",
+      "version": "1.0.0",
+      "source_sha256": "cd936448677671629b4dfb787692ce71fc7d2dbcb1162fc40ad4c7a46b4824ef",
+      "state": "PASS",
+      "error_code": "",
+      "verification_level": "runtime_image_decoded",
+      "evidence": {
+        "counts": {
+          "images_requested": "2",
+          "images_available": "354",
+          "images_attempted": "2",
+          "images_verified": "2",
+          "decoded_image_count": "2",
+          "unsupported_decode_count": ""
+        },
+        "evidence_type": "image"
+      },
+      "first_failed_stage": "",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "info",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "pages",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "image",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {
+            "counts": {
+              "images_requested": "2",
+              "images_available": "354",
+              "images_attempted": "2",
+              "images_verified": "2",
+              "decoded_image_count": "2",
+              "unsupported_decode_count": ""
+            },
+            "evidence_type": "image"
+          }
+        }
+      ]
+    },
+    {
+      "key": "goda",
+      "name": "GoDa漫画",
+      "version": "1.2.1",
+      "source_sha256": "2ea20c673a7f421131cb7013f7daa0df0ba2aa88ffc01d7b72b1271c5e496232",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    },
+    {
+      "key": "ykmh",
+      "name": "优酷漫画",
+      "version": "1.0.0",
+      "source_sha256": "4acf20610d47b5ebadace326683e354bdd07995d13c55911735747d7ade6ed7d",
+      "state": "FAIL",
+      "error_code": "SOURCE_SEARCH_ERROR",
+      "verification_level": "metadata_only",
+      "evidence": {
+        "error_origin": "source",
+        "evidence_type": "source"
+      },
+      "first_failed_stage": "search",
+      "stages": [
+        {
+          "stage": "load",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "metadata",
+          "state": "PASS",
+          "error_code": "",
+          "evidence": {}
+        },
+        {
+          "stage": "search",
+          "state": "FAIL",
+          "error_code": "SOURCE_SEARCH_ERROR",
+          "evidence": {
+            "error_origin": "source",
+            "evidence_type": "source"
+          }
+        }
+      ]
+    }
+  ]
+}
