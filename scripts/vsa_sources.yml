@@ -174,6 +174,16 @@ sources:
     explore_index: 0
   wmanhua:
     keyword: 斗罗
+    blocked_patterns:
+    - status: 403
+    - err: Connection refused
+    - err: timed out
+    - err: Errno 111
+    - err: HandshakeException
+    - err: Connection terminated during handshake
+    - err: Connection closed before
+    blocked_reason: 站点对机房/海外 IP 间歇性 TLS 掐断(DioException HandshakeException, 本机
+      PASS 而 Azure CI 11-20/11-21 恒现); 命中即归 BLOCKED, 验收通过时仍 PASS
   shenqimanhua:
     entry: explore
     explore_index: 0

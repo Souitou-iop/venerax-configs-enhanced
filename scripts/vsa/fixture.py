@@ -336,6 +336,27 @@ class VsaThrowInfo extends ComicSource {
 }
 """
 
+ENV_BLOCKED_JS_TEMPLATE = """\
+/** VSA 正向(声明命中): 源 JS 抛出结构化 HTTP 状态错误, 命中声明 status:403 → BLOCKED */
+class VsaEnvBlocked extends ComicSource {
+  name = "VSA Env Blocked";
+  key = "vsa_envblocked";
+  version = "1.0.0";
+  minAppVersion = "1.0.0";
+  url = "@BASE@/";
+  search = {
+    load: async (keyword, options, page) => {
+      // 模拟"站点对机房 IP 返回 403, 源把状态码抛出来"(baozi/ykmh/cycomic 的真实形态)
+      throw new Error("Invalid status code: 403");
+    },
+  };
+  comic = {
+    loadInfo: async (id) => new ComicDetails({ title: id, cover: "", tags: {}, chapters: new Map() }),
+    loadEp: async () => ({ images: [] }),
+  };
+}
+"""
+
 DECLARED_BROKEN_JS = """\
 /** VSA 负向: 声明受限(blocked_patterns 命中 403)但实际是 JS 解析错误 → 必须 FAIL */
 class VsaDeclaredBroken extends ComicSource {
@@ -369,6 +390,7 @@ def generate_fixture_sources(out_dir, base_url: str) -> dict:
         "vsa_badsearch": out_dir / "vsa_badsearch.js",
         "vsa_throwinfo": out_dir / "vsa_throwinfo.js",
         "vsa_declared_broken": out_dir / "vsa_declared_broken.js",
+        "vsa_envblocked": out_dir / "vsa_envblocked.js",
         "vsa_paginated": out_dir / "vsa_paginated.js",
         "vsa_mixed": out_dir / "vsa_mixed.js",
         "vsa_unsupported": out_dir / "vsa_unsupported.js",
@@ -380,6 +402,7 @@ def generate_fixture_sources(out_dir, base_url: str) -> dict:
     files["vsa_badsearch"].write_text(BAD_SEARCH_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_throwinfo"].write_text(THROW_INFO_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_declared_broken"].write_text(DECLARED_BROKEN_JS.replace("@BASE@", base_url), encoding="utf-8")
+    files["vsa_envblocked"].write_text(ENV_BLOCKED_JS_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_paginated"].write_text(PAGINATED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_mixed"].write_text(MIXED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")
     files["vsa_unsupported"].write_text(UNSUPPORTED_FIXTURE_TEMPLATE.replace("@BASE@", base_url), encoding="utf-8")

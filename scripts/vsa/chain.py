@@ -19,6 +19,9 @@ BLOCKED 判定原则(P0-2):
   - 入口/搜索阶段 JS 解析失败时, 对源站点首页做一次性挑战页证据探测,
     探测到挑战特征 → BLOCKED(CHALLENGE_PAGE), 否则 FAIL;
   - 无任何证据支撑的失败 → FAIL。
+  源级(error_origin=source)错误不短路 FAIL, 与 runner 级错误共用同一证据归因阶梯:
+  JS 解析类优先于受限声明(防声明掩盖), 源自身 error_code 在 FAIL 时保留、
+  BLOCKED 时记入 evidence.source_error_code。
 """
 from __future__ import annotations
 
@@ -487,22 +490,28 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
 
     def finish_failed(stage: str, r, extra: str = ""):
         payload = getattr(r, "payload", None) or {}
+        src_code = ""
+        stderr = r.stderr or ""
         if payload.get("error_origin") == "source" and payload.get("error_code"):
-            code = str(payload["error_code"])
-            evidence = {"evidence_type": "source", "error_origin": "source"}
-            res.add(stage, STATE_FAIL, (r.err_brief + extra)[:200], r.elapsed_ms,
-                    error_code=code, evidence=evidence)
-            res.state = STATE_FAIL
-            res.error_code = code
-            res.evidence.update(evidence)
-            return res
+            # 源级错误不短路 FAIL: 与 runner 级共用证据归因阶梯
+            # (认证/结构化状态+声明命中 → BLOCKED; JS 解析类优先于受限声明 → FAIL)。
+            src_code = str(payload["error_code"])
+            src_msg = str(payload.get("error") or "")
+            if src_msg and src_msg not in stderr:
+                stderr = f"{src_msg}\n{stderr}" if stderr else src_msg
         challenge = {}
-        if stage in ("search",) and _is_js_error(r.stderr or "") and base_url:
+        if stage in ("search",) and _is_js_error(stderr) and base_url:
             challenge = probe_site_challenge(base_url + "/")
             res.evidence["challenge_probe"] = challenge
-        state, code, evidence = classify_failure(stage, r.stderr or "", patterns, challenge)
-        detail = (r.err_brief + extra)[:200]
-        res.add(stage, state, detail, r.elapsed_ms, error_code=code, evidence=evidence)
+        state, code, evidence = classify_failure(stage, stderr, patterns, challenge)
+        if src_code:
+            evidence["error_origin"] = "source"
+            if src_code != code:
+                evidence["source_error_code"] = src_code
+            if state == STATE_FAIL:
+                code = src_code  # FAIL 保留源结构化错误码; BLOCKED 用分类码并留证
+        detail = (r.err_brief or (str(payload.get("error") or "") if src_code else "")) + extra
+        res.add(stage, state, detail[:200], r.elapsed_ms, error_code=code, evidence=evidence)
         res.state = state
         res.error_code = code
         res.evidence.update(evidence)
@@ -744,18 +753,10 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
             sample_err = first_bad.get("error", "") or runner_payload.get("error", "")
             detail = (f"样本{first_bad.get('index', 0) + 1}: HTTP {status} "
                       f"{first_bad.get('magic', '')} {sample_err}").strip()
-            if runner_payload.get("error_origin") == "source" and runner_payload.get("error_code"):
-                code = str(runner_payload["error_code"])
-                res.add("image", STATE_FAIL, detail[:200], error_code=code,
-                        evidence={"evidence_type": "source", "error_origin": "source"})
-                res.state = STATE_FAIL
-                res.error_code = code
-                res.evidence.update({"error_origin": "source"})
-                return res
-            # 结构化错误码优先(SOURCE_PAGES_EMPTY/IMAGE_DECODE_FAILED 等是数据/解码层事实 → FAIL);
-            # 仅 HTTP 状态类失败走声明式分类(status 命中 → BLOCKED, 证据=http_status)
             runner_code = runner_payload.get("error_code") or ""
-            if runner_code in ("SOURCE_PAGES_EMPTY", "SOURCE_PAGES_ERROR"):
+            # 结构化错误码优先(SOURCE_PAGES_EMPTY 是数据层事实 → FAIL, 不被声明掩盖);
+            # 其余(含源级 loadEp/onImageLoad 错误)走证据归因: 声明命中 → BLOCKED, JS 错误优先 → FAIL
+            if runner_code == "SOURCE_PAGES_EMPTY":
                 state, code, evidence = STATE_FAIL, runner_code, {
                     "evidence_type": "image", "suspected_cause": "unknown",
                     "expected_environment_constraint": True}
@@ -763,6 +764,12 @@ def run_source(rt: VeneraRuntime, js_path: Path, cfg: SourceTestConfig,
                 state, code, evidence = classify_failure(
                     "image", synth := f"HTTP {status} {sample_err}", patterns,
                     http_status=int(status) if isinstance(status, int) else None)
+                if runner_payload.get("error_origin") == "source" and runner_code:
+                    evidence["error_origin"] = "source"
+                    if runner_code != code:
+                        evidence["source_error_code"] = runner_code
+                    if state == STATE_FAIL:
+                        code = runner_code  # FAIL 保留源结构化错误码; BLOCKED 用分类码并留证
             res.add("image", state, detail[:200], error_code=code,
                     evidence={"evidence_type": "image", "counts": counts, **evidence})
             res.state = state
