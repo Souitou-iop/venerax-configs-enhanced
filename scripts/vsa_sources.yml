@@ -259,3 +259,29 @@ sources:
     - err: unexpected token
     - err: Errno 111
     blocked_reason: 站点短时高频即 IP 403(已知); 命中即归 BLOCKED, 验收通过时仍 PASS
+  cycomic:
+    keyword: 海贼王
+    blocked_patterns:
+    - status: 403
+    - err: Connection refused
+    - err: timed out
+    - err: unexpected token
+    - err: Errno 111
+    - err: Remote end closed connection
+    - err: Connection terminated during handshake
+    - err: Connection closed before
+    - err: IMAGE_FETCH_ERROR
+    blocked_reason: 图域 tuer.justpic01pt.com:666 对机房/突发请求按 IP 短窗限流(握手期掐连,
+      间隔约 1 分钟恢复; 单次请求正常, JPEG 字节本机已验证); 命中即归 BLOCKED, 验收通过时仍 PASS
+  roum27:
+    keyword: 飞机杯
+    blocked_patterns:
+    - status: 403
+    - err: Connection refused
+    - err: timed out
+    - err: unexpected token
+    - err: Errno 111
+    - err: Connection closed before
+    - err: SITE_DEGRADED
+    blocked_reason: 站点对自动化/机房客户端限流(连接期掐断)并降级为截断页(仅广告无正文图);
+      真实设备网络(dart:io 单请求)全量页已验证; 命中即归 BLOCKED, 验收通过时仍 PASS

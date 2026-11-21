@@ -359,5 +359,21 @@
     "version": "1.0.0",
     "description": "chapterImages 直链图；短时高频可能触发 IP 403，内置低频使用",
     "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/ykmh.js"
+  },
+  {
+    "name": "次元漫画",
+    "fileName": "cycomic.js",
+    "key": "cycomic",
+    "version": "1.0.0",
+    "description": "最近更新/人气榜/实时搜索(无分页)；#img-box 章节直链图，图域 tuer.justpic01pt.com:666 非常规端口偶发拒连",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/cycomic.js"
+  },
+  {
+    "name": "肉漫屋",
+    "fileName": "roum27.js",
+    "key": "roum27",
+    "version": "1.1.1",
+    "description": "SSR 改版重写：搜索参数 term（上游 keyword 失效）、章节图签名 URL base64 载荷解码（补齐站点剥离的 padding）、按载荷过滤广告图",
+    "url": "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/roum27.js"
   }
 ]
