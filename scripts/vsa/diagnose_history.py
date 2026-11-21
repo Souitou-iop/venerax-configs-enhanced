@@ -5,7 +5,12 @@ import json
 import time
 from pathlib import Path
 
-from .diagnose import DIAGNOSE_HISTORY_SCHEMA_VERSION, DiagnoseInputError, normalize_report
+from .diagnose import (
+    DIAGNOSE_HISTORY_SCHEMA_VERSION,
+    DiagnoseInputError,
+    normalize_report,
+    platform_family,
+)
 
 
 def snapshot_report(report: dict, run_id: str | None = None) -> dict:
@@ -31,8 +36,14 @@ def write_snapshot(snapshot: dict, history_dir: Path) -> Path:
         raise DiagnoseInputError("run_id 含有非法字符")
     path = history_dir / f"{run_id}.json"
     encoded = json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n"
-    if path.exists() and path.read_text(encoding="utf-8") != encoded:
-        raise DiagnoseInputError(f"相同 run_id 已存在不同快照: {run_id}")
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = None
+        if existing != snapshot:
+            raise DiagnoseInputError(f"相同 run_id 已存在不同快照: {run_id}")
+        return path
     path.write_text(encoded, encoding="utf-8")
     return path
 
@@ -81,6 +92,8 @@ def select_baseline(current_report: dict, history: list[dict]) -> dict | None:
     current_context = current["context"]
     candidates = []
     for record in history:
+        if record.get("report_hash") == current["report_hash"]:
+            continue
         context = record.get("context") or {}
         if context.get("mode") != current_context.get("mode"):
             continue
@@ -88,7 +101,9 @@ def select_baseline(current_report: dict, history: list[dict]) -> dict | None:
             continue
         if context.get("config_hash") != current_context.get("config_hash"):
             continue
-        if context.get("platform") != current_context.get("platform"):
+        current_platform = current_context.get("platform_family") or current_context.get("platform")
+        candidate_platform = context.get("platform_family") or context.get("platform")
+        if platform_family(candidate_platform) != platform_family(current_platform):
             continue
         candidates.append(record)
     if not candidates:

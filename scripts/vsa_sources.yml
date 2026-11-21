@@ -168,7 +168,7 @@ sources:
     blocked_reason: 机房网络下站点响应超时; 命中即归 BLOCKED, 验收通过时仍 PASS
   bukamh:
     entry: explore
-    explore_index: 0
+    explore_index: 1
   hipmh:
     entry: explore
     explore_index: 0

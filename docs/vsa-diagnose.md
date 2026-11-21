@@ -32,7 +32,7 @@ The command writes `diagnose.json` and `diagnose.md`. A valid VSA report with so
 
 The result can report `FIRST_OBSERVATION`, `NEW_FAILURE`, `PERSISTENT_FAILURE`, `RECOVERED`, `INTERMITTENT`, `ENVIRONMENT_BLOCKED`, `INFRASTRUCTURE_ERROR`, `NOT_COMPARABLE`, `STATE_CHANGED` and `NO_CHANGE`.
 
-The baseline must match the current report's mode, strict flag, runtime build, configuration hash and execution platform. A normal repository `source_commit` change does not block comparison. A changed `runner_build_id` is recorded as a clue while the report remains comparable. Runtime, configuration, mode or environment changes produce `NOT_COMPARABLE` with a reason.
+The baseline must match the current report's mode, strict flag, runtime build, configuration hash and execution platform family (OS + CPU architecture). GitHub runner kernel and glibc revisions are ignored so routine image rotation does not discard history; the raw platform change is still reported as `platform_changed`. A normal repository `source_commit` change does not block comparison. A changed `runner_build_id` is recorded as a clue while the report remains comparable. Runtime, configuration, mode or environment-family changes produce `NOT_COMPARABLE` with a reason.
 
 Each event carries observed facts, a bounded hypothesis, confidence and up to three next checks. A hypothesis never replaces the original VSA state or evidence.
 

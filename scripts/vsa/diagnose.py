@@ -33,11 +33,44 @@ class Comparison:
     runner_changed: bool = False
     source_commit_changed: bool = False
     runtime_changed: bool = False
+    platform_changed: bool = False
 
 
 def _short(value: Any, limit: int = 240) -> str:
     text = str(value or "")
     return text[:limit]
+
+
+def platform_family(value: Any) -> str:
+    """Collapse runner image build details to the parts that affect verification.
+
+    GitHub rotates runner kernels (and glibc revisions) without changing the
+    execution environment enough to invalidate a state comparison. Keep the OS
+    and CPU architecture, but drop kernel/distribution build strings.
+    """
+    text = _short(value, 200).strip()
+    if not text:
+        return ""
+    parts = [part.strip().lower() for part in text.split("-") if part.strip()]
+    os_name = parts[0]
+    arch_aliases = {
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+        "arm64": "arm64",
+        "aarch64": "arm64",
+        "i386": "i386",
+        "i686": "i386",
+        "ppc64le": "ppc64le",
+        "s390x": "s390x",
+        "riscv64": "riscv64",
+    }
+    arch = next((arch_aliases[part] for part in parts if part in arch_aliases), "")
+    if os_name in {"linux", "darwin", "macos"}:
+        os_name = "macos" if os_name in {"darwin", "macos"} else "linux"
+        return f"{os_name}-{arch}" if arch else os_name
+    if os_name.startswith("windows"):
+        return "windows"
+    return os_name
 
 
 def _safe_evidence(value: Any) -> dict:
@@ -49,7 +82,7 @@ def _safe_evidence(value: Any) -> dict:
         "error_origin",
     }
     result = {}
-    for key in allowed:
+    for key in sorted(allowed):
         if key not in value:
             continue
         item = value[key]
@@ -120,6 +153,7 @@ def normalize_context(report: dict) -> dict:
         "runner_build_id": _short(meta.get("runner_build_id"), 160),
         "config_hash": _short(meta.get("config_hash"), 160),
         "platform": _short(meta.get("platform"), 160),
+        "platform_family": platform_family(meta.get("platform_family") or meta.get("platform")),
         "environment_id": _short(meta.get("environment_id"), 160),
         "source_commit": _short(meta.get("source_commit"), 160),
     }
@@ -141,7 +175,7 @@ def normalize_report(report: dict) -> dict:
 def compare_context(current: dict, baseline: dict) -> Comparison:
     current_context = current.get("context") or {}
     baseline_context = baseline.get("context") or {}
-    for field in ("mode", "strict", "runtime_build_id", "config_hash", "platform"):
+    for field in ("mode", "strict", "runtime_build_id", "config_hash", "platform_family"):
         if current_context.get(field) != baseline_context.get(field):
             return Comparison(False, f"{field} 不一致", source_commit_changed=(
                 current_context.get("source_commit") != baseline_context.get("source_commit")),
@@ -150,11 +184,20 @@ def compare_context(current: dict, baseline: dict) -> Comparison:
     baseline_runner = baseline_context.get("runner_build_id")
     current_source = current_context.get("source_commit")
     baseline_source = baseline_context.get("source_commit")
+    platform_changed = bool(
+        current_context.get("platform")
+        and baseline_context.get("platform")
+        and current_context.get("platform") != baseline_context.get("platform")
+    )
+    reason = "runtime、模式、配置和执行平台一致"
+    if platform_changed:
+        reason = "runtime、模式、配置一致; 平台同为 OS+架构, runner 镜像版本有变化"
     return Comparison(
         True,
-        "runtime、模式、配置和执行环境一致",
+        reason,
         runner_changed=bool(current_runner and baseline_runner and current_runner != baseline_runner),
         source_commit_changed=current_source != baseline_source,
+        platform_changed=platform_changed,
     )
 
 
@@ -234,6 +277,10 @@ def _is_intermittent(current: dict, history: list[dict] | None) -> bool:
 def diagnose(current_report: dict, baseline: dict | None = None,
              history: list[dict] | None = None) -> dict:
     current = normalize_report(current_report)
+    history = [
+        record for record in (history or [])
+        if record.get("report_hash") != current.get("report_hash")
+    ]
     if baseline and baseline.get("schema_version") == 2:
         baseline = normalize_report(baseline)
     comparison = compare_context(current, baseline) if baseline else Comparison(False, "没有历史基线")
@@ -272,6 +319,7 @@ def diagnose(current_report: dict, baseline: dict | None = None,
                 "source_sha_changed": bool(previous and previous.get("source_sha256") != source.get("source_sha256")),
                 "runtime_changed": comparison.runtime_changed,
                 "runner_changed": comparison.runner_changed,
+                "platform_changed": comparison.platform_changed,
             },
         })
     for key, previous in baseline_sources.items():
@@ -291,7 +339,8 @@ def diagnose(current_report: dict, baseline: dict | None = None,
                      "from_stage": previous.get("first_failed_stage"), "to_stage": None,
                      "from_error_code": previous.get("error_code"), "to_error_code": None,
                      "source_sha_changed": False, "runtime_changed": comparison.runtime_changed,
-                     "runner_changed": comparison.runner_changed},
+                     "runner_changed": comparison.runner_changed,
+                     "platform_changed": comparison.platform_changed},
         })
     counts = {}
     for item in events:
@@ -309,6 +358,7 @@ def diagnose(current_report: dict, baseline: dict | None = None,
             "runner_changed": comparison.runner_changed,
             "runtime_changed": comparison.runtime_changed,
             "source_commit_changed": comparison.source_commit_changed,
+            "platform_changed": comparison.platform_changed,
         },
         "summary": {"total": len(events), "events": counts},
         "events": events,

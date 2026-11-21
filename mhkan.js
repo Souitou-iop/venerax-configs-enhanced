@@ -12,7 +12,7 @@
 class Mhkan extends ComicSource {
   name = "漫画看";
   key = "mhkan";
-  version = "1.0.0";
+  version = "1.0.1";
   minAppVersion = "1.0.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/mhkan.js";
 
@@ -32,6 +32,13 @@ class Mhkan extends ComicSource {
     } catch (_) {
       return href;
     }
+  }
+
+  static normalizeImageUrl(url) {
+    if (/^https?:\/\/coldpic\.sfacg\.com\//i.test(url)) {
+      return url.replace(/\.webp(\?|$)/i, ".jpg$1");
+    }
+    return url;
   }
 
   static parseList(document) {
@@ -111,7 +118,8 @@ class Mhkan extends ComicSource {
       let body = res.body;
       let document = new HtmlDocument(body);
 
-      let titleEl = document.querySelector("h1, .comic-title, .detail-title");
+      let titleEl = document.querySelector("#mintWorkTitle")
+        || document.querySelector(".comic-title, .detail-title, h1");
       let title = titleEl ? titleEl.text.trim() : id;
       let coverEl = document.querySelector(
         ".comic-cover img, .detail-cover img, .cover img, img.lazy"
@@ -176,14 +184,19 @@ class Mhkan extends ComicSource {
       let document = new HtmlDocument(body);
       let images = [];
       let seen = {};
-      for (let img of document.querySelectorAll("img.reader-image, img.lazy, img")) {
+      let collect = (img) => {
+        if (img.attributes["data-mint-comic-cover"] !== undefined) return;
         let u = img.attributes["data-src"] || img.attributes["src"] || "";
-        if (!u || /placeholder\.svg|logo|icon/i.test(u)) continue;
-        if (!/\.(jpg|jpeg|png|webp)/i.test(u) && !/UploadFiles|wszwhg/i.test(u)) continue;
-        u = Mhkan.abs(u);
-        if (seen[u]) continue;
+        if (!u || /placeholder\.svg|logo|icon/i.test(u)) return;
+        if (!/\.(jpg|jpeg|png|webp)/i.test(u) && !/UploadFiles|wszwhg/i.test(u)) return;
+        u = Mhkan.normalizeImageUrl(Mhkan.abs(u));
+        if (seen[u]) return;
         seen[u] = true;
         images.push(u);
+      };
+      for (let img of document.querySelectorAll("img.reader-image, img.lazy")) collect(img);
+      if (images.length < 1) {
+        for (let img of document.querySelectorAll("img")) collect(img);
       }
       if (images.length < 1) throw "No images";
       return { images };

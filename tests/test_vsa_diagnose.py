@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 
 from scripts.vsa.diagnose import DiagnoseInputError, diagnose, load_report
-from scripts.vsa.diagnose_history import load_history, snapshot_report, write_snapshot
+from scripts.vsa.diagnose_history import (
+    load_history,
+    select_baseline,
+    snapshot_report,
+    write_snapshot,
+)
 
 
 def report(state="PASS", error_code="", stage="", level="runtime_image_decoded",
@@ -52,6 +57,46 @@ class DiagnoseTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["event"], "NOT_COMPARABLE")
         self.assertTrue(result["events"][0]["diff"]["runtime_changed"])
 
+    def test_runner_kernel_update_keeps_comparison(self):
+        current = report(state="FAIL", error_code="IMAGE_HTTP_ERROR", stage="image",
+                         platform="Linux-7.0.0-1016-aws-x86_64-with-glibc2.43")
+        baseline = report(platform="Linux-7.0.0-1019-azure-x86_64-with-glibc2.43")
+        result = diagnose(current, baseline)
+        self.assertTrue(result["comparison"]["comparable"])
+        self.assertTrue(result["comparison"]["platform_changed"])
+        self.assertEqual(result["events"][0]["event"], "NEW_FAILURE")
+        self.assertTrue(result["events"][0]["diff"]["platform_changed"])
+
+    def test_platform_family_change_is_not_comparable(self):
+        current = report(platform="macOS-27.3-arm64-arm-64bit-Mach-O")
+        baseline = report(platform="Linux-7.0.0-1019-azure-x86_64-with-glibc2.43")
+        result = diagnose(current, baseline)
+        self.assertFalse(result["comparison"]["comparable"])
+        self.assertIn("platform_family", result["comparison"]["reason"])
+
+    def test_history_baseline_ignores_kernel_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            baseline = report(platform="Linux-7.0.0-1019-azure-x86_64-with-glibc2.43")
+            write_snapshot(snapshot_report(baseline, "run-1"), path)
+            current = report(
+                state="FAIL",
+                error_code="IMAGE_HTTP_ERROR",
+                stage="image",
+                platform="Linux-7.0.0-1016-aws-x86_64-with-glibc2.43",
+            )
+            selected = select_baseline(current, load_history(path))
+            self.assertIsNotNone(selected)
+            result = diagnose(current, selected)
+            self.assertTrue(result["comparison"]["comparable"])
+
+    def test_history_baseline_skips_current_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            current = report(state="FAIL", error_code="IMAGE_HTTP_ERROR", stage="image")
+            write_snapshot(snapshot_report(current, "run-current"), path)
+            self.assertIsNone(select_baseline(current, load_history(path)))
+
     def test_recovered_requires_strict_image_level(self):
         current = report(state="PASS", level="runtime_image_bytes")
         result = diagnose(current, report(state="FAIL", error_code="IMAGE_HTTP_ERROR", stage="image"))
@@ -82,10 +127,26 @@ class DiagnoseTests(unittest.TestCase):
             self.assertEqual(len(load_history(path)), 1)
             self.assertEqual(json.loads(written.read_text())["run_id"], "run-1")
             write_snapshot(snapshot, path)
+            written.write_text(
+                json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            write_snapshot(snapshot, path)
             with self.assertRaises(DiagnoseInputError):
                 changed = dict(snapshot)
                 changed["report_hash"] = "different"
                 write_snapshot(changed, path)
+
+    def test_snapshot_evidence_keys_are_sorted(self):
+        current = report()
+        current["results"][0]["evidence"] = {
+            "http_status": 403,
+            "evidence_type": "http_status",
+            "marker": "challenge",
+        }
+        snapshot = snapshot_report(current, "run-1")
+        evidence = snapshot["sources"][0]["evidence"]
+        self.assertEqual(list(evidence), sorted(evidence))
 
     def test_intermittent_requires_multiple_history_records(self):
         history = []

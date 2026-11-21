@@ -15,6 +15,12 @@
 - **新增 肉漫屋 (`roum27.js` v1.1.1)**：基于 2026-11-21 SSR 改版实测重写（上游 coldnighten v1.1.0 解析已失效）。修复上游搜索参数（服务端只认 `term`，上游 `keyword` 恒空页）；章节图提取改为签名 URL 内嵌 base64 载荷（`s3://rouman/images/...`，站点剥离了 base64 padding 需补齐后解码），按载荷前缀过滤广告图（`advertiser-assets`/`adcs`）；识别站点对自动化客户端的降级页（200 但截断、仅广告无正文图）并重试一次，仍未恢复则声明 `SITE_DEGRADED` 环境受限。真实设备网络（dart:io 单请求全量页 + 68 张 WebP 内容图提取）已验证。
 - **VSA 纳管**：`cycomic`/`roum27` 进入 `index.json`（46→48 源）与 `scripts/vsa_sources.yml` 测试配置（含环境受限声明）；`--check-coverage` 全源纳管通过，Diagnose 单测 17/17 通过。
 
+## 2026-11-18
+
+- **漫画看 (`mhkan.js` v1.0.1)**：阅读页只采集 `reader-image`/`lazy` 正文图，跳过 `data-mint-comic-cover` 隐藏封面元数据；将 `coldpic.sfacg.com` 的 `.webp` 地址归一到实际 `.jpg`，避免把代理封面或错误扩展名当成正文图并在 404 时误报 `IMAGE_HTTP_ERROR`；详情标题改用 `#mintWorkTitle`，不再显示“作品详情”。本机 VSA 全链路 PASS（2/2 解码）。
+- **布卡漫画 VSA 配置**：探索入口由“最新”切到“热门”，避免最新列表头部新作章节为空导致全链路样本不稳定；本机 VSA 全链路 PASS（2/2 解码）。
+- **VSA Diagnose 基线**：执行平台比较归一为 OS + CPU 架构，忽略 GitHub runner 内核/glibc 版本轮换；修复今日报告因 `Linux-...-aws` 与 `Linux-...-azure` 不一致而退化为 `FIRST_OBSERVATION` 的问题；历史快照证据键固定排序，避免同一 `run_id` 因 JSON 键序漂移被判冲突；Diagnose 单测 17/17 通过。
+
 ## 2026-11-15
 
 - **漫蛙漫画 (`manwaba.js` v2.0.5)**：章节页参数在 Base64 解码前还原 JavaScript 字符串转义（`\uXXXX`、`\xXX`、`\/`、`\\`），修复 AES 解密后的 JSON 解析失败与 `SOURCE_PAGES_ERROR`；本机与远端检查通过，VSA 修复前 FAIL、修复后 PASS，图片 2/2 解码通过。
