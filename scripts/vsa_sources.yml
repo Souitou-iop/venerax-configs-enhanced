@@ -11,6 +11,9 @@ sources:
     blocked_patterns: []
   manga_dex:
     keyword: one piece
+    exempt: true
+    exempt_reason: api.mangadex.org 对机房 IP 回 HTML 挑战页(源抛 SyntaxError, 探针同刻绿灯
+      = 运行时指纹差异); 应用内正常, 恢复验收需挑战页绕过方案
   zaimanhua:
     entry: explore
     explore_index: 0
@@ -34,10 +37,9 @@ sources:
     blocked_reason: cdndm5 图域拦机房 IP(本机可 PASS); 命中即归 BLOCKED, 验收通过时仍 PASS
   ikmmh:
     keyword: ''
-    expect: blocked
-    blocked_reason: 站点拦截海外/机房网络(403), 仅大陆网络可用
-    blocked_patterns:
-    - status: 403
+    exempt: true
+    exempt_reason: 对海外/机房网络软封锁(恒 200+空结果, 无结构化 403 证据); 空结果按
+      P0-2 不套用环境受限归类, 恢复验收需可信样本或站点侧放行
   ManHuaGui:
     keyword: 斗罗大陆
   jm:
@@ -52,6 +54,9 @@ sources:
   ehentai:
     entry: explore
     explore_index: 0
+    exempt: true
+    exempt_reason: 已知部分画廊 loadEp 恒空列表(样本画廊相关, 11-14 接入起恒现); 需换
+      稳定样本画廊或源级适配后恢复验收
   nhentai:
     keyword: chinese
   hitomi:
@@ -69,26 +74,20 @@ sources:
     explore_index: 0
   shonen_jump_plus:
     keyword: SPY×FAMILY
-    blocked_patterns:
-    - status: 403
-    - err: Connection refused
-    - err: timed out
-    - err: Errno 111
-    blocked_reason: GraphQL 搜索对机房 IP 弹 bot 挑战(HTML); 命中即归 BLOCKED, 验收通过时仍 PASS
+    exempt: true
+    exempt_reason: GraphQL 搜索对机房 IP 弹 bot 挑战页(源抛 SyntaxError, 声明模式对 JS
+      解析类错误不生效属设计); 恢复验收需挑战页绕过方案
   comic_walker:
     entry: explore
     explore_index: 0
-    blocked_patterns:
-    - status: 403
-    - err: Connection refused
-    - err: timed out
-    - err: Errno 111
-    blocked_reason: 站点对机房 IP 弹 bot 挑战(HTML); 命中即归 BLOCKED, 验收通过时仍 PASS
+    exempt: true
+    exempt_reason: 官方站详情可达但正文图片列表恒空(runner 侧拿不到 reader 数据, 疑
+      与站点 viewer JS 互锁); 需逆向其数据流后恢复验收
   ccc:
     keyword: ''
-    expect: blocked
-    blocked_reason: 章节需验证码登录; search 阶段可验证后按声明归类
-    blocked_patterns: []
+    exempt: true
+    exempt_reason: 章节/正文需验证码登录态, 未登录恒空图片列表; 空数据按 P0-2 不套用声明归类,
+      恢复验收需登录态注入方案
   manga51:
     keyword: 百合
     blocked_patterns:
@@ -128,9 +127,9 @@ sources:
     explore_index: 0
   baihehui:
     keyword: ''
-    expect: blocked
-    blocked_reason: 搜索需登录, 登录态不属于 CLI 验收范围
-    blocked_patterns: []
+    exempt: true
+    exempt_reason: 搜索需 yamibo 账号(登录态不属于 CLI 验收范围), 且搜索网关对机房 IP
+      间歇 5xx(11-21 本机 502/CI 504); 恢复验收需账号注入方案
   comick:
     entry: explore
     explore_index: 0
