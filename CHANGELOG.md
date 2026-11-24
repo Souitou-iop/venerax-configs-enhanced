@@ -9,6 +9,10 @@
 - 不要移动或删除这些 Tag；Komiic 的订阅直链依赖其不可变性。
 - GitHub Releases 仅用于阶段性里程碑公告，不替代本文件。
 
+## 2026-11-24
+
+- **探针连通级重试与云出口 TLS 掐断识别 (`scripts/e2e_health_check.py`)**：Issue #14 中 W漫画被判「无法直连」，实为 GitHub Actions 的 Azure 网段对 `www.wmanhua.com` 间歇性丢弃 TLS 握手（Globalping 的 Azure 节点 4 次里 3 次 `Request timed out during the TLS handshake`，而同期 US/JP/DE/SG/GB 非云厂商节点稳定 200）。连通级探测改为握手类异常最多重试 3 次；三次仍失败则用 Globalping 从 5 个非云厂商网络复测同一 HTTPS 地址，若拿到 2xx/3xx 则判 `OK_CONN` 并标记 `env_limited`（出口网络限制），不计入连续异常与告警状态机；复核拿不到证据或独立网络同样不可达时仍判 `DOWN`，复核失败不会成为漏报通道。403/429 等站点明确答复不重试、不降级。新增 7 项离线单测（含“只取到云厂商节点不算独立证据”的负向对照），`tests/` 全量 25 项通过，本地全量演练中 W漫画恢复 `OK_CONN`。
+
 ## 2026-11-21
 
 - **新增 次元漫画 (`cycomic.js` v1.0.0)**：移植 YHQY-Dev/venera-sources 同名源并入库；最近更新/人气榜列表、实时搜索 API（POST `/api/front/index/search`，无分页）、`#book` 详情与 `#img-box` 章节直链图。2026-11-21 海外代理内容级实测全链路通过（搜索 15 命中、403 章、37 图，图域 `tuer.justpic01pt.com:666` JPEG 字节落地）；runner 分级实测 load/search/explore/info/pages 全 PASS。图域对突发请求按 IP 短窗限流（握手期掐连、约 1 分钟恢复、单次请求正常），CI 机房命中即归 BLOCKED。

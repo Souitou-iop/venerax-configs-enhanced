@@ -230,7 +230,7 @@ def lzstring_decompress_b64(s):
 
 def result(verdict, tier, latency=-1, code=None, detail="", steps=None):
     return {"verdict": verdict, "tier": tier, "latency_ms": latency, "code": code,
-            "detail": detail, "steps": steps or []}
+            "detail": detail, "steps": steps or [], "env_limited": False}
 
 
 def body_snippet(body, limit=80):
@@ -243,6 +243,124 @@ def body_snippet(body, limit=80):
 
 def get_dual_time_str(include_seconds=False):
     return hhc.get_dual_time_str(include_seconds)
+
+# ---------------------------------------------------------------- 连通级重试与 TLS 掐断识别
+
+# 机房/云出口(如 GitHub Actions 的 Azure 网段)会对部分站点的 TLS 握手做间歇性丢弃:
+# 同一秒内换节点即 200, 而握手超时既不代表站点宕机, 也不该按站点故障告警。
+TLS_INTERRUPT_HINTS = (
+    'handshake operation timed out',
+    'handshake failure',
+    'handshake',
+    'ssl.c:',
+    'tlsv1 alert',
+    'connection reset by peer',
+    'connection closed before',
+    'connection terminated during handshake',
+    'eof occurred in violation of protocol',
+)
+
+CONN_ATTEMPTS = 3
+CONN_RETRY_DELAY = 1.0
+
+# 独立网络复核: GitHub Actions 的 Azure 出口会被部分站点间歇性掐断 TLS 握手,
+# 用 Globalping 从非 Microsoft 网络复测同一 HTTPS 地址, 才能区分「站点故障」与「出口限制」。
+CROSS_CHECK_LOCATIONS = ({'country': 'US'}, {'country': 'JP'}, {'country': 'DE'},
+                         {'country': 'SG'}, {'country': 'GB'})
+CROSS_CHECK_TIMEOUT = 25
+CLOUD_EGRESS_NETWORKS = ('microsoft', 'azure')
+
+
+def is_tls_interrupt(body):
+    """判断 ERR 响应体是否属于 TLS 握手被掐断/超时这类可重试的网络层异常。"""
+    if not isinstance(body, (bytes, bytearray)) or not body:
+        return False
+    text = body.decode('utf-8', 'ignore').lower()
+    return any(hint in text for hint in TLS_INTERRUPT_HINTS)
+
+
+def globalping_https_check(url):
+    """从独立网络复测同一 HTTPS 地址。
+
+    返回 {'ok': bool, 'code': int|None, 'evidence': [str], 'error': str|None}；
+    ok=True 表示有非云厂商探针完成了 TLS 握手并拿到 2xx/3xx，即站点在线而当前出口链路有问题。
+    任何 API 异常都降级为无证据(ok=False)，让源照常进入告警流程，绝不因为复核失败而放过真实故障。
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.netloc:
+        return {'ok': False, 'evidence': [], 'error': 'not an https url'}
+    payload = {
+        'target': parsed.netloc,
+        'type': 'http',
+        'measurementOptions': {
+            'request': {'method': 'GET', 'path': parsed.path or '/',
+                        'headers': {'User-Agent': UA_BROWSER}},
+            'protocol': 'HTTPS',
+        },
+        'locations': [dict(loc) for loc in CROSS_CHECK_LOCATIONS],
+    }
+    try:
+        req = urllib.request.Request(
+            'https://api.globalping.io/v1/measurements',
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'User-Agent': 'VeneraX-HealthCheck/1.0'},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            measurement_id = json.loads(resp.read().decode('utf-8'))['id']
+    except Exception as e:
+        return {'ok': False, 'evidence': [], 'error': f'globalping submit failed: {e}'}
+
+    deadline = time.time() + CROSS_CHECK_TIMEOUT
+    data = {}
+    while time.time() < deadline:
+        time.sleep(2)
+        try:
+            with urllib.request.urlopen(
+                    f'https://api.globalping.io/v1/measurements/{measurement_id}', timeout=8) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+        except Exception as e:
+            return {'ok': False, 'evidence': [], 'error': f'globalping poll failed: {e}'}
+        if data.get('status') in ('finished', 'failed'):
+            break
+
+    evidence, ok, ok_code, cloud_only = [], False, None, 0
+    for item in data.get('results') or []:
+        probe = item.get('probe') or {}
+        res = item.get('result') or {}
+        network = str(probe.get('network') or '')
+        if any(cloud in network.lower() for cloud in CLOUD_EGRESS_NETWORKS):
+            # 与 runner 同属云厂商出口, 无法证明是「当前出口」的问题, 不作为证据。
+            cloud_only += 1
+            continue
+        where = f"{probe.get('country', '?')}/{probe.get('city', '?')} ({network or '未知网络'})"
+        code = res.get('statusCode')
+        if isinstance(code, int):
+            evidence.append(f"{where} → HTTP {code}")
+            if 200 <= code < 400:
+                ok = True
+                ok_code = code if ok_code is None else ok_code
+        else:
+            evidence.append(f"{where} → 无响应")
+    if evidence:
+        error = None
+    elif cloud_only:
+        error = f'only cloud-vendor probes answered ({cloud_only})'
+    else:
+        error = data.get('status') or 'no independent result'
+    return {'ok': ok, 'code': ok_code, 'evidence': evidence, 'error': error}
+
+
+def conn_request(url, headers, data, method, timeout):
+    """带重试的连通级请求: 只有 TLS 握手类异常才重试, HTTP 状态码一律不重试。"""
+    attempts = []
+    code, body, ms = 'ERR', b'', -1
+    for attempt in range(1, CONN_ATTEMPTS + 1):
+        code, body, ms = http_req(url, headers=headers, data=data, method=method, timeout=timeout)
+        attempts.append((code, ms))
+        if code != 'ERR' or not is_tls_interrupt(body) or attempt == CONN_ATTEMPTS:
+            break
+        time.sleep(CONN_RETRY_DELAY)
+    return code, body, ms, attempts
 
 # ---------------------------------------------------------------- 判定徽章（修复版）
 
@@ -1398,9 +1516,11 @@ def conn_probe(key):
         headers = hhc.get_pica_headers()
     if headers is None:
         headers = {'User-Agent': UA_BROWSER}
-    code, body, ms = http_req(p['url'], headers=headers, data=p.get('data'),
-                              method=p.get('method', 'GET'), timeout=10)
+    code, body, ms, attempts = conn_request(p['url'], headers=headers, data=p.get('data'),
+                                            method=p.get('method', 'GET'), timeout=10)
     steps = [f"{p['url']} → HTTP {code} ({ms}ms)"]
+    if len(attempts) > 1:
+        steps.append("重试记录: " + " → ".join(f"HTTP {c} ({m}ms)" for c, m in attempts))
     # 告警表只渲染 detail 字段，任何非 OK 分支都必须自带可读说明，否则 Issue 里是一片空白。
     snippet = body_snippet(body)
     if snippet:
@@ -1427,6 +1547,25 @@ def conn_probe(key):
         return result('RISK_CONTROL', 'conn', code=code,
                       detail=f"HTTP {code} —— 站点限频/风控拦截" + tail, steps=steps)
     if code == 'ERR':
+        if is_tls_interrupt(body):
+            # 握手被掐断是网络层现象, 需独立网络复核才能断定站点是否真的活着;
+            # 复核无证据时按原判定 DOWN 走告警, 不让复核本身成为漏报通道。
+            cross = globalping_https_check(p['url'])
+            steps.extend(f"独立网络复核: {line}" for line in cross['evidence'])
+            if cross['ok']:
+                # 本地握手失败, 耗时无参考价值; 延迟留空由表格显示为 -1, 状态码取自独立复核。
+                res = result('OK_CONN', 'conn', code=cross['code'],
+                             detail=(f"当前出口 HTTPS 握手被掐断（{snippet or '连接超时'}），"
+                                     "独立网络 HTTPS 复核可达 —— 站点在线，属机房/云出口网络限制，非站点故障"),
+                             steps=steps)
+                res['env_limited'] = True
+                return res
+            if cross['error']:
+                steps.append(f"独立网络复核未取到结果: {cross['error']}")
+            attempts_note = f"（共 {len(attempts)} 次尝试）" if len(attempts) > 1 else ''
+            return result('DOWN', 'conn', code=code,
+                          detail=f"无法连接{attempts_note}: {snippet or '连接超时或被拒绝'}",
+                          steps=steps)
         return result('DOWN', 'conn', code=code,
                       detail=f"无法连接: {snippet or '连接超时或被拒绝'}", steps=steps)
     if isinstance(code, int) and 500 <= code < 600:
@@ -1560,7 +1699,9 @@ def update_alert_state(overseas, mainland, engine_failed, conn_core_bad):
         alertable.add('__mainland_engine__')
     for key, value in overseas.items():
         # 已知受限源仅在 README 展示，避免把运行环境限制当作站点故障告警。
-        if key not in KNOWN_RESTRICTED_SOURCES and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR'):
+        # env_limited 已由独立网络 HTTPS 复核证明站点在线(云出口掐断 TLS), 同样不计入告警。
+        if (key not in KNOWN_RESTRICTED_SOURCES and not value.get('env_limited')
+                and value.get('verdict') in ('DOWN', 'BLOCKED', 'ERROR')):
             alertable.add(key)
     alertable.update(f'core:{key}' for key in conn_core_bad)
     triggered, recovered = [], []
@@ -1614,8 +1755,12 @@ def build_step_summary(overseas, mainland, engine_name, alert_msg=None):
         cn = mainland.get(key) if mainland else None
         cn_cell = f"`{cn['code']}` ({cn['latency']}ms)" if cn else '未测（节点未覆盖或引擎不可用）'
         ov_code = ov['code'] if ov['code'] is not None else '-'
-        md += (f"| **{p['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | "
-               f"`{ov_code}` ({ov['latency_ms']}ms) | {cn_cell} |\n")
+        ov_badge = VERDICT_BADGE[ov['verdict']]
+        if ov.get('env_limited'):
+            ov_badge += '（出口受限）'
+        ov_lat = f"{ov['latency_ms']}ms" if ov['latency_ms'] and ov['latency_ms'] > 0 else '—'
+        md += (f"| **{p['name']}** | {ov['tier']} | {ov_badge} | "
+               f"`{ov_code}` ({ov_lat}) | {cn_cell} |\n")
     return md
 
 
@@ -1656,7 +1801,10 @@ def build_alert_body(overseas, mainland, engine_name, content_bad, conn_core_bad
             rows.append(f"| **{name}** (主力源) | {ov.get('tier', 'conn')} | {badge} | {detail} |")
         elif k in overseas:
             ov = overseas[k]
-            rows.append(f"| **{hhc.PROBES[k]['name']}** | {ov['tier']} | {VERDICT_BADGE[ov['verdict']]} | "
+            badge = VERDICT_BADGE[ov['verdict']]
+            if ov.get('env_limited'):
+                badge += '（出口受限）'
+            rows.append(f"| **{hhc.PROBES[k]['name']}** | {ov['tier']} | {badge} | "
                         f"{ov['detail'] or '—'} |")
         elif k == '__mainland_engine__':
             rows.append(f"| **大陆双探活引擎** | engine | ❌ **无法直连** | SSH 私有探针与 Globalping 备用探针均无响应 |")
@@ -1709,6 +1857,7 @@ def main():
     # Step 4: 判定汇总 + 告警规则
     content_bad = [k for k, v in overseas.items()
                    if k not in KNOWN_RESTRICTED_SOURCES
+                   and not v.get('env_limited')
                    and v['verdict'] in ('DOWN', 'BLOCKED', 'ERROR')]
     conn_core_bad = []
     if mainland:
