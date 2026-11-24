@@ -9,11 +9,16 @@
  * - 图片为 data-locked 保护: 去掉 JCOMIC_TRAPS_ 前缀 → 反转 → base64 解出真实 URL,
  *   解不出 http 开头的即陷阱图, 直接丢弃;
  * - 阅读页后端偶发无图壳页, 接入端建议对空结果重试 1-2 次 (Venera 端由用户重试兜底)。
+ *
+ * 2026-11-24 改版: 阅读页不再输出 data-locked, 改为直接给 images.jcomic.net 的
+ * S3 预签名 URL (X-Amz-Expires=60, 60 秒内有效)。图域要求带 jcomic_access cookie,
+ * 该 cookie 由阅读页响应 Set-Cookie 下发并由运行时 cookie jar 自动保存; onImageLoad
+ * 必须显式带上它, 否则图域一律 403。旧的 data-locked 解码保留作兜底。
  */
 class Jcomic extends ComicSource {
   name = "JComic";
   key = "jcomic";
-  version = "1.0.0";
+  version = "1.1.0";
   minAppVersion = "1.0.0";
   url = "https://cdn.jsdelivr.net/gh/Souitou-iop/venerax-configs-enhanced@main/jcomic.js";
 
@@ -127,27 +132,50 @@ class Jcomic extends ComicSource {
       let res = await Network.get(`${Jcomic.baseUrl}/page/${encodeURIComponent(epId)}`, Jcomic.headers);
       if (res.status !== 200) throw `Invalid status: ${res.status}`;
       let body = res.body;
-      // data-locked: JCOMIC_TRAPS_ 前缀 → 反转 → base64 → 真实 URL (陷阱图解不出 http, 丢弃)
       let images = [];
-      let re = /data-locked="([^"]+)"/g;
-      let x;
-      while ((x = re.exec(body)) !== null) {
-        try {
-          let val = x[1].replace("JCOMIC_TRAPS_", "").split("").reverse().join("");
-          let u = Convert.decodeUtf8(Convert.decodeBase64(val));
-          if (/^https?:/i.test(u)) images.push(u);
-        } catch (_) { /* 陷阱图或非法编码, 跳过 */ }
+
+      // 2026-11 改版: 阅读页直接内联 S3 预签名直链 (src 或 data-src), 走 img.jcomic-img
+      let document = new HtmlDocument(body);
+      for (let img of document.querySelectorAll("img.jcomic-img")) {
+        let u = img.attributes["data-src"] || img.attributes["src"] || "";
+        if (/^https?:/i.test(u) && images.indexOf(u) === -1) images.push(u);
       }
+      document.dispose();
+
+      // 旧版兜底: data-locked → 去 JCOMIC_TRAPS_ 前缀 → 反转 → base64 → 真实 URL
+      // (陷阱图解不出 http 开头, 直接丢弃)
+      if (images.length === 0) {
+        let re = /data-locked="([^"]+)"/g;
+        let x;
+        while ((x = re.exec(body)) !== null) {
+          try {
+            let val = x[1].replace("JCOMIC_TRAPS_", "").split("").reverse().join("");
+            let u = Convert.decodeUtf8(Convert.decodeBase64(val));
+            if (/^https?:/i.test(u) && images.indexOf(u) === -1) images.push(u);
+          } catch (_) { /* 陷阱图或非法编码, 跳过 */ }
+        }
+      }
+
       if (images.length < 1) throw "No images (empty shell page, retry recommended)";
       return { images };
     },
 
-    onImageLoad: (url, comicId, epId) => {
+    onImageLoad: async (url, comicId, epId) => {
+      let headers = {
+        Referer: Jcomic.baseUrl + "/",
+        "User-Agent": Jcomic.headers["User-Agent"],
+      };
+      // 图域 (images.jcomic.net) 只认带 jcomic_access cookie 的请求; cookie 由阅读页
+      // 的 Set-Cookie 写入运行时 cookie jar, 这里读出来显式带给图片请求。
+      try {
+        let cookies = await Network.getCookies(Jcomic.baseUrl);
+        let access = (cookies || []).filter((c) => c && c.name === "jcomic_access");
+        if (access.length > 0) {
+          headers["Cookie"] = access.map((c) => `${c.name}=${c.value}`).join("; ");
+        }
+      } catch (_) { /* 读 cookie 失败时照旧发请求, 由图片状态暴露问题 */ }
       return {
-        headers: {
-          Referer: Jcomic.baseUrl + "/",
-          "User-Agent": Jcomic.headers["User-Agent"],
-        },
+        headers: headers,
       };
     },
   };
