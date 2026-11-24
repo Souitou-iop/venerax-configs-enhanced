@@ -237,7 +237,10 @@ for key, name, url, advice in (
         'name': name,
         'url': url,
         'method': 'GET',
-        'headers': {'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36'},
+        # Accept-Language 必须带上: 部分中文站(如热门漫画)缺中文语言头会直接返回 404,
+        # 探针若只发 UA 会把站点正常在线误判成故障。
+        'headers': {'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
+                    'Accept-Language': 'zh-CN,zh;q=0.9'},
         'data': None,
         'line_opts': '主站 / 公开 API',
         'advice': advice + ' 定时巡检目前仅连通级，不作为正文验收。',

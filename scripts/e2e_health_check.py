@@ -62,6 +62,10 @@ CCC_MAINTENANCE_WINDOW = '2026-10-03 10:00 至 2026-10-04 18:00（UTC+8）'
 UA_BROWSER = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
 
+# 浏览器默认会带 Accept-Language; 部分中文站(如热门漫画 m.remenmanhua.com)缺中文语言头
+# 会直接返回 404 而不是页面, 探针漏发这个头就会把在线站点判成故障。
+ACCEPT_LANGUAGE_ZH = 'zh-CN,zh;q=0.9'
+
 # 载入现行 hybrid 探针模块：复用其 PROBES 配置、pica 签名、双时间、Globalping 大陆引擎
 _spec = importlib.util.spec_from_file_location("hhc", os.path.join(ROOT, 'scripts', 'hybrid_health_check.py'))
 hhc = importlib.util.module_from_spec(_spec)
@@ -72,7 +76,7 @@ _spec.loader.exec_module(hhc)
 def http_req(url, headers=None, data=None, method="GET", timeout=12, max_bytes=12 * 1024 * 1024, insecure=False):
     """返回 (status, body_bytes, elapsed_ms)；网络异常时 status='ERR'。
     insecure=True 时跳过 TLS 证书校验（仅用于证书链损坏的自家图片 CDN，如包子 bzcdn.net）。"""
-    h = {"User-Agent": UA_BROWSER}
+    h = {"User-Agent": UA_BROWSER, "Accept-Language": ACCEPT_LANGUAGE_ZH}
     if headers:
         h.update(headers)
     url = urllib.parse.quote(url, safe=":/?&=#%+@[]!$'()*;,~-._")

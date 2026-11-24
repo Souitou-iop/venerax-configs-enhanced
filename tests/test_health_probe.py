@@ -131,6 +131,23 @@ class HealthProbeTests(unittest.TestCase):
         self.assertEqual(len(stub.calls), 1)
         self.assertFalse(res["env_limited"])
 
+    def test_probe_sends_chinese_accept_language(self):
+        """热门漫画缺中文语言头会返回 404, 探针必须带上 Accept-Language 才不误判。"""
+        sent = {}
+        original_request = MODULE.http_req
+
+        def _capture(url, headers=None, **kwargs):
+            sent.update(headers or {})
+            return 200, b"<html>ok</html>", 500
+
+        try:
+            MODULE.http_req = _capture
+            MODULE.conn_probe("remenmanhua")
+        finally:
+            MODULE.http_req = original_request
+        self.assertEqual(sent.get("Accept-Language"), MODULE.ACCEPT_LANGUAGE_ZH)
+        self.assertIn("zh", sent.get("Accept-Language", ""))
+
     def test_env_limited_source_does_not_enter_alert_state(self):
         """env_limited 不应累计连续异常; 已在告警态的源应在本轮恢复销单。"""
         with tempfile.TemporaryDirectory() as tmp:
