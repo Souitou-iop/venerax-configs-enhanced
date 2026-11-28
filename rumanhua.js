@@ -2,7 +2,7 @@
 class RuManHua extends ComicSource {
   name = "如漫画";
   key = "rumanhua";
-  version = "1.1.0";
+  version = "1.1.1";
   minAppVersion = "1.4.0";
 
   url =
@@ -197,7 +197,13 @@ class RuManHua extends ComicSource {
         return { images };
       }
 
-      const encryptedParams = paramsMatch[1];
+      // 站点 2026-11-27 起经 JSON 编码输出 base64(\/ 与 \u002b), 解码前须反转义;
+      // 对无转义的旧格式是 no-op, 双向兼容
+      const encryptedParams = paramsMatch[1]
+        .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) =>
+          String.fromCharCode(parseInt(h, 16)),
+        )
+        .replace(/\\\//g, "/");
       const keys = await this.getDecryptionKeys();
       const decrypted = await this.decryptParams(
         encryptedParams,

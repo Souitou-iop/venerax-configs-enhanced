@@ -910,8 +910,15 @@ def e2e_wnacg():
 
 
 def decrypt_html_params(params):
-    """Decrypt the AES-128-CBC params used by 51漫画/如漫画 using openssl."""
-    raw = base64.b64decode(params)
+    """Decrypt the AES-128-CBC params used by 51漫画/如漫画 using openssl.
+
+    2026-11-27 起如漫画页面把 base64 经 JSON 编码输出(\\/ 与 \\u002b),
+    须先反转义再解码; 对无转义的旧格式是 no-op, 双向兼容。
+    """
+    unescaped = re.sub(r"\\u([0-9a-fA-F]{4})",
+                       lambda m: chr(int(m.group(1), 16)), params)
+    unescaped = unescaped.replace("\\/", "/")
+    raw = base64.b64decode(unescaped)
     if len(raw) <= 16 or len(raw[16:]) % 16:
         raise ValueError("invalid encrypted params")
     key = b"9S8$vJnU2ANeSRoF"
